@@ -1353,11 +1353,17 @@
 
         /* Server Toggle Styles */
         .server-toggle {
-            display: flex;
+            display: none;
+            /* Hidden by default */
             align-items: center;
             gap: 10px;
             margin-left: -8px;
             margin-right: -8px;
+        }
+
+        .server-toggle.configured {
+            display: flex;
+            /* Only show when configured */
         }
 
         .server-toggle-button {
@@ -1370,10 +1376,16 @@
             font-size: 0.9rem;
             cursor: pointer;
             transition: all var(--transition-speed);
-            display: flex;
+            display: none;
+            /* Hidden by default */
             align-items: center;
             gap: 5px;
             white-space: nowrap;
+        }
+
+        .server-toggle-button.configured {
+            display: flex;
+            /* Only show when configured */
         }
 
         .server-toggle-button:hover {
@@ -2787,6 +2799,21 @@
             // Navigate to the new path
             window.location.href = newPath;
         }
+
+        // Check if server toggle should be shown (only if properly configured)
+        document.addEventListener('DOMContentLoaded', function () {
+            const serverToggles = document.querySelectorAll('.server-toggle');
+            const serverButtons = document.querySelectorAll('.server-toggle-button');
+
+            serverButtons.forEach(button => {
+                const serverText = button.querySelector('.server-text');
+                if (serverText && !serverText.textContent.includes('SERVER_NAME')) {
+                    // Server is properly configured, show the toggle
+                    button.classList.add('configured');
+                    button.closest('.server-toggle').classList.add('configured');
+                }
+            });
+        });
 
     </script>
 
