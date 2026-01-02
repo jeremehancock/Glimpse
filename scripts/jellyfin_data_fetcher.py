@@ -499,7 +499,8 @@ def main():
     default_page_size = int(os.environ.get('PAGE_SIZE', '100'))
     
     # Get excluded libraries from environment variable
-    excluded_libraries_str = os.environ.get('JELLYFIN_EXCLUDE_LIBRARIES', '')
+    # Check for EMBY_EXCLUDE_LIBRARIES first (for Emby), fall back to JELLYFIN_EXCLUDE_LIBRARIES
+    excluded_libraries_str = os.environ.get('EMBY_EXCLUDE_LIBRARIES') or os.environ.get('JELLYFIN_EXCLUDE_LIBRARIES', '')
     excluded_libraries = [lib.strip() for lib in excluded_libraries_str.split(',') if lib.strip()] if excluded_libraries_str else []
     
     parser = argparse.ArgumentParser(description='Fetch Jellyfin media data and posters')

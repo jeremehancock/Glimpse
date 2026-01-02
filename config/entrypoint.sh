@@ -97,15 +97,15 @@ echo "PATH=/usr/local/bin:/usr/bin:/bin:/sbin:/usr/sbin" >/etc/cron.d/media-cron
 
 # Add cron jobs for each configured server
 if [ -n "$PLEX_URL" ] && [ -n "$PLEX_TOKEN" ]; then
-    echo "$CRON_SCHEDULE root cd /app && $PYTHON_PATH /app/scripts/plex_data_fetcher.py --url \"$PLEX_URL\" --token \"$PLEX_TOKEN\" --output /app/data/plex >> /var/log/cron.log 2>&1" >>/etc/cron.d/media-cron
+    echo "$CRON_SCHEDULE root cd /app && PLEX_EXCLUDE_LIBRARIES=\"$PLEX_EXCLUDE_LIBRARIES\" $PYTHON_PATH /app/scripts/plex_data_fetcher.py --url \"$PLEX_URL\" --token \"$PLEX_TOKEN\" --output /app/data/plex >> /var/log/cron.log 2>&1" >>/etc/cron.d/media-cron
 fi
 
 if [ -n "$JELLYFIN_URL" ] && [ -n "$JELLYFIN_TOKEN" ]; then
-    echo "$CRON_SCHEDULE root cd /app && $PYTHON_PATH /app/scripts/jellyfin_data_fetcher.py --url \"$JELLYFIN_URL\" --token \"$JELLYFIN_TOKEN\" --output /app/data/jellyfin >> /var/log/cron.log 2>&1" >>/etc/cron.d/media-cron
+    echo "$CRON_SCHEDULE root cd /app && JELLYFIN_EXCLUDE_LIBRARIES=\"$JELLYFIN_EXCLUDE_LIBRARIES\" $PYTHON_PATH /app/scripts/jellyfin_data_fetcher.py --url \"$JELLYFIN_URL\" --token \"$JELLYFIN_TOKEN\" --output /app/data/jellyfin >> /var/log/cron.log 2>&1" >>/etc/cron.d/media-cron
 fi
 
 if [ -n "$EMBY_URL" ] && [ -n "$EMBY_TOKEN" ]; then
-    echo "$CRON_SCHEDULE root cd /app && $PYTHON_PATH /app/scripts/jellyfin_data_fetcher.py --url \"$EMBY_URL\" --token \"$EMBY_TOKEN\" --output /app/data/emby >> /var/log/cron.log 2>&1" >>/etc/cron.d/media-cron
+    echo "$CRON_SCHEDULE root cd /app && EMBY_EXCLUDE_LIBRARIES=\"$EMBY_EXCLUDE_LIBRARIES\" $PYTHON_PATH /app/scripts/jellyfin_data_fetcher.py --url \"$EMBY_URL\" --token \"$EMBY_TOKEN\" --output /app/data/emby >> /var/log/cron.log 2>&1" >>/etc/cron.d/media-cron
 fi
 
 # Apply cron job
@@ -1883,19 +1883,19 @@ echo "Running initial data fetch"
 # Fetch Plex data if configured
 if [ -n "$PLEX_URL" ] && [ -n "$PLEX_TOKEN" ]; then
     echo "Fetching Plex data"
-    $PYTHON_PATH /app/scripts/plex_data_fetcher.py --url "$PLEX_URL" --token "$PLEX_TOKEN" --output /app/data/plex
+    PLEX_EXCLUDE_LIBRARIES="$PLEX_EXCLUDE_LIBRARIES" $PYTHON_PATH /app/scripts/plex_data_fetcher.py --url "$PLEX_URL" --token "$PLEX_TOKEN" --output /app/data/plex
 fi
 
 # Fetch Jellyfin data if configured
 if [ -n "$JELLYFIN_URL" ] && [ -n "$JELLYFIN_TOKEN" ]; then
     echo "Fetching Jellyfin data"
-    $PYTHON_PATH /app/scripts/jellyfin_data_fetcher.py --url "$JELLYFIN_URL" --token "$JELLYFIN_TOKEN" --output /app/data/jellyfin
+    JELLYFIN_EXCLUDE_LIBRARIES="$JELLYFIN_EXCLUDE_LIBRARIES" $PYTHON_PATH /app/scripts/jellyfin_data_fetcher.py --url "$JELLYFIN_URL" --token "$JELLYFIN_TOKEN" --output /app/data/jellyfin
 fi
 
 # Fetch Emby data if configured (using jellyfin fetcher since APIs are compatible)
 if [ -n "$EMBY_URL" ] && [ -n "$EMBY_TOKEN" ]; then
     echo "Fetching Emby data using Jellyfin API compatibility"
-    $PYTHON_PATH /app/scripts/jellyfin_data_fetcher.py --url "$EMBY_URL" --token "$EMBY_TOKEN" --output /app/data/emby
+    EMBY_EXCLUDE_LIBRARIES="$EMBY_EXCLUDE_LIBRARIES" $PYTHON_PATH /app/scripts/jellyfin_data_fetcher.py --url "$EMBY_URL" --token "$EMBY_TOKEN" --output /app/data/emby
 fi
 
 # Make sure the data directory is accessible by nginx
