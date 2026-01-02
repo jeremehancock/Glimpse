@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -18,22 +19,27 @@
             justify-content: center;
             align-items: center;
         }
+
         .container {
             max-width: 500px;
         }
+
         h1 {
             color: #e5a00d;
             margin-bottom: 20px;
         }
+
         p {
             font-size: 18px;
             line-height: 1.6;
             margin-bottom: 30px;
         }
+
         .icon {
             font-size: 64px;
             margin-bottom: 30px;
         }
+
         button {
             background-color: #e5a00d;
             color: #000;
@@ -45,17 +51,21 @@
             font-size: 16px;
             transition: background-color 0.3s;
         }
+
         button:hover {
             background-color: #f1b020;
         }
     </style>
 </head>
+
 <body>
     <div class="container">
         <div class="icon">📶</div>
         <h1>You're Offline</h1>
-        <p>It looks like you're not connected to the internet. Glimpse Media Viewer needs a connection to show your Plex content.</p>
+        <p>It looks like you're not connected to the internet. Glimpse Media Viewer needs a connection to show your
+            content.</p>
         <button onclick="window.location.reload()">Try Again</button>
     </div>
 </body>
+
 </html>
