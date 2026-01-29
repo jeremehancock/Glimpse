@@ -120,11 +120,20 @@ class JellyfinDataFetcher:
             return None
 
     def fetch_libraries(self, user_id):
-        """Get all library collections"""
+        """Get all library collections using VirtualFolders endpoint
+
+        Note: We use /Library/VirtualFolders instead of /Users/{user_id}/Views
+        because Views returns combined/aggregate views (e.g., one "Movies" view for all
+        movie libraries), while VirtualFolders returns each individual library separately.
+        This allows importing from multiple libraries of the same type (e.g., "Movies"
+        and "Private Movies").
+        """
         try:
-            response = self.session.get(f"{self.jellyfin_url}/Users/{user_id}/Views")
+            response = self.session.get(f"{self.jellyfin_url}/Library/VirtualFolders")
             response.raise_for_status()
-            return response.json()
+            # VirtualFolders returns a list directly, wrap it to match expected format
+            libraries = response.json()
+            return {'Items': libraries}
         except requests.RequestException as e:
             print(f"Error fetching libraries: {e}")
             return None
@@ -396,10 +405,11 @@ class JellyfinDataFetcher:
         tvshows_data = []
         
         for library in libraries:
-            library_id = library.get('Id')
+            # VirtualFolders uses 'ItemId', Views uses 'Id' - support both
+            library_id = library.get('ItemId') or library.get('Id')
             library_type = library.get('CollectionType')
             library_name = library.get('Name')
-            
+
             print(f"\nProcessing library: {library_name} (Type: {library_type}, ID: {library_id})")
             
             # Check if this library should be excluded
