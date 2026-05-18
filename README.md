@@ -530,6 +530,6 @@ This application works well behind a reverse proxy like Traefik or Nginx Proxy M
 
 This project is released under the MIT License. See the `LICENSE` file for details.
 
-## 🤖 AI Assistance Disclosure
+## 🤖 AI Disclosure
 
 This project was created with the help of AI.
