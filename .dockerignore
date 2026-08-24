@@ -1,0 +1,24 @@
+.git
+.github
+.claude
+openspec
+docs
+tests
+assets
+node_modules
+*.md
+Makefile
+package.json
+package-lock.json
+pyproject.toml
+eslint.config.mjs
+.prettierrc.json
+.prettierignore
+.pytest_cache
+.ruff_cache
+__pycache__
+
+# The snapshot is a mounted volume. Copying a developer's local copy into the
+# image would ship someone else's library and then be shadowed by the mount
+# anyway.
+data

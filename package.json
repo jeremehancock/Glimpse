@@ -1,0 +1,15 @@
+{
+  "name": "glimpse",
+  "private": true,
+  "description": "Lint and format tooling for the Glimpse frontend. Not a build step — nginx serves web/ exactly as authored, and no Node runs in the image.",
+  "scripts": {
+    "lint": "eslint web --no-error-on-unmatched-pattern && prettier --check .",
+    "fmt": "eslint web --fix --no-error-on-unmatched-pattern && prettier --write ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "eslint": "^9.39.0",
+    "globals": "^16.5.0",
+    "prettier": "^3.6.2"
+  }
+}

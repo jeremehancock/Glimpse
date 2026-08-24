@@ -1,0 +1,93 @@
+name: CI
+
+# Push-only: every commit is built once, on any branch. Pull requests do NOT
+# trigger CI — GitHub attaches check runs to the commit SHA, so the push-CI
+# result is visible on the PR without a second, redundant run. This keeps a
+# single pushed commit to exactly one CI run (and therefore one publish),
+# with no skipped or cancelled duplicate. Trade-off: external fork PRs get no
+# CI here, which is acceptable for this solo dev -> main flow.
+on:
+  push:
+    branches: ['**']
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Lint · Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install toolchain
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff pytest pyyaml requests
+          npm ci
+
+      # Same targets a developer runs locally. Split into two steps so a red
+      # check names which half failed without opening the log.
+      - name: Lint (ruff · eslint · prettier)
+        run: make lint
+
+      - name: Test (pytest)
+        run: make test
+
+  docker:
+    name: Build image · Smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t glimpse:ci .
+
+      - name: Run container and probe it
+        run: |
+          # Credentials that resolve to nothing: the point is that the container
+          # comes up and serves the app, not that it can reach a media server.
+          # An unreachable server is a first-run state a real install passes
+          # through, so the app must not need one to boot.
+          docker run -d --name glimpse -p 8080:80 \
+            -e PLEX_URL=http://127.0.0.1:32400 \
+            -e PLEX_TOKEN=ci-smoke \
+            glimpse:ci
+
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/ >/dev/null 2>&1; then
+              echo "nginx is serving"; served=1; break
+            fi
+            sleep 2
+          done
+          if [ -z "${served:-}" ]; then
+            echo "::error::nginx never served a page"; docker logs glimpse; exit 1
+          fi
+
+          # This is a weak assertion and deliberately marked as one. nginx serves
+          # /app/web whether or not the entrypoint finished — the boot script can
+          # die halfway and the container still answers 200 with the files baked
+          # into the image. So a green check here means "the container came up",
+          # not "the container is configured".
+          #
+          # The `application-shell` change replaces the entrypoint's HTML
+          # rewriting with a generated /app/web/config.json. That file is the
+          # evidence the boot script ran to completion, and asserting on it here
+          # is a task of that change:
+          #
+          #   curl -fsS http://127.0.0.1:8080/config.json | grep -q primaryServer
+          #
+          # Do not add that line before the entrypoint writes the file — it would
+          # gate every push on work that has not shipped yet.
+          echo "Smoke test passed (liveness only — see the comment above)"
