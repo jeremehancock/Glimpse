@@ -1,5 +1,9 @@
 # Development workflow — Claude Code, OpenSpec & releases
 
+> **Mid-rewrite.** See [handover.md](handover.md) for what has shipped to `dev`,
+> what is unfinished, and why `:dev` is currently built by hand. Read it before
+> acting on the release flow described below.
+
 How Glimpse is developed: the **`dev` branch for feature work and testing**,
 **`main` for releases**, with every capability specified before it is built.
 
