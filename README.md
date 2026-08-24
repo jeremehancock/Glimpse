@@ -16,7 +16,7 @@ A sleek, responsive web application for browsing and viewing your Plex, Jellyfin
 
 ## ✨ Features
 
-- **Modern Interface**: Clean, responsive design that works on mobile and desktop
+- **Modern Interface**: Clean, responsive design that works on mobile and desktop — menus and details open as app-style trays on phones, swipe down to dismiss
 - **Multi-Server Support**: Connect to Plex, Jellyfin, Emby, or multiple servers simultaneously
 - **Media Browsing**: View your Movies and TV Shows with poster art
 - **Search Capability**: Quickly find content across your libraries
@@ -215,7 +215,7 @@ Exclusion lists are comma-separated and can include library names or IDs:
 ### Server Configuration Notes
 
 - **Single Server**: Configure only one server's credentials. The app will automatically detect and use the available server.
-- **Multi-Server**: Configure credentials for any combination of servers. The app will show a dropdown to switch between servers.
+- **Multi-Server**: Configure credentials for any combination of servers. With two, the app shows a toggle; with three, a switcher tray. Each server also has its own URL (`/plex/`, `/jellyfin/`, `/emby/`).
 - **Primary Server**: When multiple servers are configured, `PRIMARY_SERVER` determines which one is shown by default and affects the app's theme.
 - **Automatic Detection**: If `PRIMARY_SERVER` is set incorrectly or credentials are missing, the app will automatically detect and switch to an available server.
 - **Clean Data Updates**: When libraries are excluded, the fetchers automatically clean existing data files to ensure excluded content doesn't persist.
@@ -281,6 +281,7 @@ Glimpse/
 │
 ├── web/
 │   ├── index.html            # Frontend web interface
+│   ├── assets/               # Overlay system (trays, dialogs) + vendored Alpine.js
 │   ├── config.json           # Generated at startup — not in the repo
 │   ├── manifest.json         # PWA manifest (regenerated at startup per server)
 │   ├── sw.js                 # Service worker for PWA functionality
@@ -293,7 +294,7 @@ Glimpse/
 │       ├── favicon.ico                 # Favicon
 │       ├── favicon-16x16.png           # Favicon (16x16)
 │       ├── favicon-32x32.png           # Favicon (32x32)
-│       ├── icons/                      # Server icons for dropdown menus
+│       ├── icons/                      # Server icons for the switcher
 │       │   ├── plex.png                # Plex server icon
 │       │   ├── jellyfin.png            # Jellyfin server icon
 │       │   └── emby.png                # Emby server icon

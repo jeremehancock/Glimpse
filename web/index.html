@@ -16,6 +16,19 @@
     <!-- PWA Manifest -->
     <link rel="manifest" href="/manifest.json">
 
+    <!-- Design tokens and the overlay presentation. Loaded before the inline
+         <style> below so the page's own rules can still override, and so the
+         token declarations exist by the time anything reads them. -->
+    <link rel="stylesheet" href="/assets/tokens.css">
+    <link rel="stylesheet" href="/assets/overlays.css">
+
+    <!-- Alpine drives overlay open state. Vendored, not from a CDN: this is an
+         offline-capable PWA, and a CDN script is a network dependency that
+         breaks the app precisely when the network is what failed.
+         `defer` so it runs after the document is parsed. -->
+    <script defer src="/assets/alpine.min.js"></script>
+    <script defer src="/assets/overlays.js"></script>
+
     <!-- PWA Icons. The href values here are the Plex set; the boot script below
          repoints them when another server is active. -->
     <link rel="icon" type="image/png" sizes="192x192" href="/images/android-chrome-192x192.png">
@@ -403,42 +416,6 @@
             font-size: 0.9rem;
         }
 
-        /* Desktop Genre dropdown styles */
-        .genre-dropdown {
-            position: relative;
-            display: inline-block;
-        }
-
-        .genre-menu {
-            display: none;
-            position: absolute;
-            top: 100%;
-            right: 0;
-            /* Position from right instead of left */
-            margin-top: 5px;
-            background-color: var(--secondary-bg);
-            border-radius: 8px;
-            box-shadow: var(--shadow-md);
-            overflow: hidden;
-            z-index: 10;
-            min-width: 180px;
-            max-width: 300px;
-            /* Set a max width to prevent it from getting too large */
-            max-height: 300px;
-            overflow-y: auto;
-        }
-
-        /* For dropdowns near the left edge of the screen */
-        .genre-dropdown:first-child .genre-menu {
-            left: 0;
-            right: auto;
-        }
-
-        .genre-menu.show {
-            display: block;
-            animation: fadeIn 0.2s ease;
-        }
-
         @keyframes fadeIn {
             from {
                 opacity: 0;
@@ -715,72 +692,6 @@
             transform: scale(1) translateY(0);
         }
 
-        /* Enhanced Modal styles */
-        .modal-overlay {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.85);
-            z-index: 1000;
-            align-items: center;
-            justify-content: center;
-            opacity: 0;
-            transition: opacity var(--transition-speed) ease;
-            overflow-y: auto;
-            padding: 20px;
-            box-sizing: border-box;
-        }
-
-        .modal-overlay.active {
-            display: flex;
-            opacity: 1;
-        }
-
-        .modal-content {
-            position: relative;
-            background-color: var(--secondary-bg);
-            border-radius: 16px;
-            max-width: 1000px;
-            width: 100%;
-            margin: auto;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
-            display: flex;
-            flex-direction: column;
-            max-height: 90vh;
-            transform: translateY(30px);
-            transition: transform var(--transition-speed) ease;
-            overflow: hidden;
-        }
-
-        .modal-backdrop {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 280px;
-            background-size: cover;
-            background-position: center center;
-            opacity: 0.35;
-            z-index: 0;
-        }
-
-        .modal-backdrop::after {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(to bottom, rgba(42, 42, 42, 0.3) 0%, var(--secondary-bg) 100%);
-        }
-
-        .modal-overlay.active .modal-content {
-            transform: translateY(0);
-        }
-
         .modal-header {
             display: flex;
             align-items: flex-end;
@@ -834,30 +745,6 @@
             border-radius: 6px;
             font-size: 0.9em;
             font-weight: 500;
-        }
-
-        .modal-close {
-            position: absolute;
-            top: 15px;
-            right: 15px;
-            width: 36px;
-            height: 36px;
-            border-radius: 50%;
-            background-color: rgba(0, 0, 0, 0.4);
-            border: none;
-            color: var(--light-text);
-            font-size: 20px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: background-color var(--transition-speed);
-            padding: 0;
-            z-index: 10;
-        }
-
-        .modal-close:hover {
-            background-color: rgba(255, 255, 255, 0.1);
         }
 
         /* Custom scrollbar styles */
@@ -956,187 +843,6 @@
 
         .genre-tag:hover {
             background-color: rgba(229, 160, 13, 0.3);
-        }
-
-        /* Mobile menu button */
-        .mobile-menu-button {
-            display: none;
-            width: 40px;
-            height: 40px;
-            background-color: transparent;
-            border: none;
-            color: var(--light-text);
-            font-size: 24px;
-            cursor: pointer;
-            align-items: center;
-            justify-content: center;
-        }
-
-        /* Mobile menu */
-        .mobile-menu {
-            position: fixed;
-            top: var(--mobile-header-height);
-            left: 0;
-            width: 100%;
-            background-color: var(--header-bg);
-            z-index: 99;
-            padding: 15px;
-            box-shadow: 0 5px 10px rgba(0, 0, 0, 0.2);
-            transform: translateY(-100%);
-            transition: all 0.3s ease;
-            opacity: 0;
-            visibility: hidden;
-        }
-
-        .mobile-menu.open {
-            transform: translateY(0);
-            opacity: 1;
-            visibility: visible;
-        }
-
-        .mobile-menu .tabs {
-            flex-direction: column;
-            width: 100%;
-        }
-
-        .mobile-menu .tab {
-            width: 100%;
-            text-align: center;
-            padding: 12px;
-            border-radius: 8px;
-        }
-
-        /* Sort toggle for mobile menu */
-        .mobile-menu .sort-toggle {
-            display: flex;
-            margin-top: 15px;
-            margin-left: 0;
-            justify-content: center;
-            width: 100%;
-            flex-direction: column;
-            gap: 10px;
-        }
-
-        .mobile-menu .sort-row {
-            display: flex;
-            width: 100%;
-            gap: 10px;
-            justify-content: center;
-        }
-
-        .mobile-menu .sort-button {
-            flex: 1;
-            justify-content: center;
-            padding: 10px;
-            min-width: 80px;
-        }
-
-        .mobile-menu #mobile-genre-button {
-            width: 100%;
-            margin-top: 5px;
-        }
-
-        /* NEW MOBILE GENRE DRAWER */
-        .genre-drawer-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: rgba(0, 0, 0, 0.7);
-            z-index: 1001;
-            display: none;
-            opacity: 0;
-            transition: opacity 0.3s ease;
-        }
-
-        .genre-drawer-overlay.open {
-            display: block;
-            opacity: 1;
-        }
-
-        .genre-drawer {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            width: 100%;
-            background-color: var(--secondary-bg);
-            border-radius: 16px 16px 0 0;
-            z-index: 1002;
-            transform: translateY(100%);
-            transition: transform 0.3s ease;
-            box-shadow: 0 -5px 20px rgba(0, 0, 0, 0.3);
-            max-height: 70vh;
-            display: flex;
-            flex-direction: column;
-        }
-
-        .genre-drawer.open {
-            transform: translateY(0);
-        }
-
-        .genre-drawer-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 20px;
-            border-bottom: 1px solid var(--border-color);
-            position: relative;
-        }
-
-        .genre-drawer-title {
-            font-size: 1.2rem;
-            font-weight: 600;
-            color: var(--light-text);
-            flex: 1;
-            text-align: center;
-        }
-
-        .genre-drawer-close {
-            position: absolute;
-            right: 15px;
-            top: 15px;
-            width: 30px;
-            height: 30px;
-            background-color: rgba(0, 0, 0, 0.3);
-            border: none;
-            border-radius: 50%;
-            color: var(--light-text);
-            font-size: 18px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-        }
-
-        .genre-drawer-content {
-            overflow-y: auto;
-            padding: 10px 0;
-            max-height: calc(70vh - 70px);
-        }
-
-        .genre-drawer .genre-item {
-            padding: 15px 20px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .genre-drawer .genre-item:last-child {
-            border-bottom: none;
-        }
-
-        .genre-drawer .genre-item.active {
-            background-color: var(--primary-light);
-        }
-
-        /* Apply drawer to mobile genre buttons */
-        @media screen and (max-width: 992px) {
-            .sort-toggle .genre-dropdown .genre-menu {
-                display: none !important;
-                /* Never show dropdown menu on mobile */
-            }
         }
 
         /* No results message */
@@ -1342,15 +1048,6 @@
                 display: none;
             }
 
-            .mobile-menu-button {
-                display: flex;
-                order: 3;
-            }
-
-            .mobile-menu {
-                display: block;
-            }
-
             .modal-header {
                 margin-top: 40px;
                 padding: 20px;
@@ -1473,13 +1170,6 @@
             }
         }
 
-        /* Hide scroll-to-top when modal is open */
-        .modal-overlay.active~.scroll-to-top {
-            display: none !important;
-            opacity: 0;
-            visibility: hidden;
-        }
-
         .logo-icon img {
             height: 50px;
             border-radius: 20%;
@@ -1543,18 +1233,6 @@
             .server-toggle .server-text {
                 display: none;
             }
-
-            /* Show text for mobile menu toggle */
-            .mobile-menu .server-toggle-button .server-text {
-                display: inline !important;
-            }
-
-            .mobile-menu .server-toggle-button {
-                width: 100%;
-                justify-content: center;
-                margin-top: 10px;
-                padding: 10px;
-            }
         }
 
         @media screen and (max-width: 480px) {
@@ -1565,7 +1243,7 @@
 
         /* Mobile server toggle styling */
         @media screen and (max-width: 768px) {
-            .mobile-menu .server-toggle-button {
+            .sheet__body .server-toggle-button {
                 width: 100%;
                 justify-content: center;
                 margin-top: 10px;
@@ -1575,7 +1253,18 @@
     </style>
 </head>
 
-<body>
+<!-- One Alpine scope on <body> owns every overlay's open state.
+
+     Deliberately flat rather than a scope per overlay: overlays here open each
+     other — the menu opens the genre tray, the detail tray opens the trailer —
+     and sibling scopes cannot see one another's state, so each hand-off would
+     need an event. A single scope is honest about the fact that these six are
+     one system.
+
+     `overlaysOpen` is not read by the scroll lock or the focus manager; both
+     watch the DOM instead, so an overlay added later is covered without being
+     registered here. See overlays.js. -->
+<body x-data="{ menuOpen: false, genreOpen: false, serverOpen: false, detailOpen: false, trailerOpen: false, rouletteOpen: false }">
     <div class="header">
         <div class="header-content">
             <div class="logo-section">
@@ -1598,73 +1287,152 @@
                     <button class="sort-button" data-sort="date">
                         <span class="sort-icon">📅 Date Added ▼</span>
                     </button>
-                    <!-- Genre filter dropdown -->
-                    <div class="genre-dropdown">
-                        <button class="sort-button genre-button" data-filter="genre">
-                            <span class="sort-icon">🏷️ Genre</span>
-                        </button>
-                        <div class="genre-menu">
-                            <div class="genre-item active" data-genre="all">All Genres</div>
-                            <!-- Genre items will be populated dynamically -->
-                        </div>
-                    </div>
-                    <!-- Server Toggle (only shows when both servers configured) -->
+                    <!-- Genre filter. One control at every width now: this
+                         opens the same tray the phone does, instead of a
+                         CSS dropdown that had to be built and maintained
+                         separately from the drawer. -->
+                    <button class="sort-button genre-button" x-ref="genreTrigger"
+                        @click="genreOpen = true" aria-haspopup="dialog">
+                        <span class="sort-icon">🏷️ Genre</span>
+                    </button>
+                    <!-- Server Toggle (only shows when 2+ servers configured) -->
                     <div class="server-toggle">
-                        <button class="server-toggle-button" onclick="toggleServer()">
+                        <button class="server-toggle-button" x-ref="serverTrigger">
                             <span class="server-icon">🔄</span>
-                            <span class="server-text">Switch to SERVER_NAME</span>
+                            <span class="server-text">Switch server</span>
                         </button>
                     </div>
                 </div>
             </div>
-            <button class="mobile-menu-button" aria-label="Menu">☰</button>
+            <button class="mobile-menu-button" aria-label="Menu" x-ref="menuTrigger"
+                @click="menuOpen = true" aria-haspopup="dialog">☰</button>
         </div>
     </div>
 
-    <!-- Mobile Menu -->
-    <div class="mobile-menu">
-        <div class="tabs">
-            <div class="tab active" data-content="movies">Movies</div>
-            <div class="tab" data-content="tvshows">TV Shows</div>
-        </div>
-        <!-- Sort toggle for mobile menu -->
-        <div class="sort-toggle">
-            <div class="sort-row">
-                <button class="sort-button active" data-sort="alpha">
-                    <span class="sort-icon">A-Z</span>
-                </button>
-                <button class="sort-button" data-sort="date">
-                    <span class="sort-icon">📅 Date Added ▼</span>
-                </button>
-            </div>
-            <!-- Mobile Genre button - now triggers drawer -->
-            <button class="sort-button genre-button" id="mobile-genre-button">
-                <span class="sort-icon">🏷️ Genre</span>
-            </button>
-            <!-- Mobile Server Toggle (only shows when both servers configured) -->
-            <button class="sort-button server-toggle-button"
-                onclick="toggleServer(); mobileMenu.classList.remove('open');">
-                <span class="server-icon">🔄</span>
-                <span class="server-text">Switch to SERVER_NAME</span>
-            </button>
-            <!-- Mobile Install Button (will be shown/hidden by JavaScript) -->
-            <button class="sort-button install-button mobile-install-button">
-                <span class="install-icon">📱</span>
-                <span class="install-text">Install App</span>
-            </button>
-        </div>
-    </div>
+    <!-- ============ Actions tray (phone navigation) ============
+         Teleported to <body>, and that is load-bearing rather than tidiness.
 
-    <!-- NEW MOBILE GENRE DRAWER -->
-    <div class="genre-drawer-overlay">
-        <div class="genre-drawer">
-            <div class="genre-drawer-header">
-                <div class="genre-drawer-title">Select Genre</div>
-                <button class="genre-drawer-close">×</button>
+         This markup lives inside the overlay scope on <body>, but the header is
+         a candidate to become a translucent surface, and `backdrop-filter`
+         makes an element a containing block for its fixed-position descendants
+         — the same rule that catches `transform`. The moment that happens, a
+         `position: fixed; inset: 0` tray nested in the header stops resolving
+         against the viewport and renders squashed into the height of the bar
+         that opened it.
+
+         Keeping it teleported means that change can never reintroduce the bug.
+         It renders correctly either way on a desktop viewport, because the tray
+         is hidden there — which is exactly what makes this easy to "simplify"
+         into a fault nobody sees until they test on a phone. -->
+    <template x-teleport="body">
+        <div class="sheet" x-show="menuOpen" x-cloak style="display:none"
+            x-transition:enter="overlay-opening" x-transition:enter-start="overlay-shut"
+            x-transition:enter-end="overlay-shown" x-transition:leave="overlay-closing"
+            x-transition:leave-start="overlay-shown" x-transition:leave-end="overlay-shut"
+            @keydown.escape.window="menuOpen = false">
+            <div class="sheet__backdrop" @click="menuOpen = false"></div>
+            <div class="sheet__panel" role="dialog" aria-modal="true" aria-label="Actions"
+                tabindex="-1">
+                <div class="sheet__grip"><span class="sheet__handle"></span></div>
+                <div class="sheet__head">
+                    <!-- "Actions", not "Menu": these are things to do, not
+                         places to go. -->
+                    <span class="sheet__title">Actions</span>
+                </div>
+                <div class="sheet__body menu__body">
+                    <div class="tabs">
+                        <div class="tab active" data-content="movies" @click="menuOpen = false">
+                            Movies</div>
+                        <div class="tab" data-content="tvshows" @click="menuOpen = false">TV Shows
+                        </div>
+                    </div>
+                    <div class="sort-toggle">
+                        <div class="sort-row">
+                            <button class="sort-button active" data-sort="alpha"
+                                @click="menuOpen = false">
+                                <span class="sort-icon">A-Z</span>
+                            </button>
+                            <button class="sort-button" data-sort="date" @click="menuOpen = false">
+                                <span class="sort-icon">📅 Date Added ▼</span>
+                            </button>
+                        </div>
+                        <!-- Focus moves to the trigger BEFORE this tray hides.
+                             Alpine hides on the flush after the handler, and
+                             hiding a focused element hands its focus to <body>
+                             — which the focus manager reads a frame later to
+                             decide where to return focus, and an origin rooted
+                             at the body is the one case it declines to restore.
+                             Without this, the genre tray opens correctly, focus
+                             lands in it correctly, and dismissing it drops the
+                             keyboard user at the top of the page. Nothing
+                             errors and the pointer path looks perfect. -->
+                        <button class="sort-button genre-button"
+                            @click="$refs.menuTrigger.focus(); menuOpen = false; genreOpen = true"
+                            aria-haspopup="dialog">
+                            <span class="sort-icon">🏷️ Genre</span>
+                        </button>
+                        <button class="sort-button server-toggle-button" x-ref="serverTriggerMobile">
+                            <span class="server-icon">🔄</span>
+                            <span class="server-text">Switch server</span>
+                        </button>
+                        <button class="sort-button install-button mobile-install-button"
+                            @click="menuOpen = false">
+                            <span class="install-icon">📱</span>
+                            <span class="install-text">Install App</span>
+                        </button>
+                    </div>
+                </div>
             </div>
-            <div class="genre-drawer-content">
-                <!-- Genre items will be populated dynamically -->
+        </div>
+    </template>
+
+    <!-- ============ Genre tray ============
+         One implementation, both widths. This replaces BOTH the desktop
+         `.genre-menu` dropdown and the phone `.genre-drawer` — two
+         implementations of one control, which is why every genre feature in
+         this app had to be written twice. -->
+    <div class="sheet" x-show="genreOpen" x-cloak style="display:none"
+        x-transition:enter="overlay-opening" x-transition:enter-start="overlay-shut"
+        x-transition:enter-end="overlay-shown" x-transition:leave="overlay-closing"
+        x-transition:leave-start="overlay-shown" x-transition:leave-end="overlay-shut"
+        @keydown.escape.window="genreOpen = false">
+        <div class="sheet__backdrop" @click="genreOpen = false"></div>
+        <div class="sheet__panel" role="dialog" aria-modal="true" aria-label="Select genre"
+            tabindex="-1">
+            <div class="sheet__grip"><span class="sheet__handle"></span></div>
+            <div class="sheet__head">
+                <span class="sheet__title">Genre</span>
+                <button class="overlay__close" @click="genreOpen = false"
+                    aria-label="Close">×</button>
+            </div>
+            <div class="sheet__body genre-tray__body">
+                <!-- Populated by updateGenreList(); the all-genres entry is the
+                     one fixed member, so it is authored rather than generated. -->
                 <div class="genre-item active" data-genre="all">All Genres</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ Server switcher tray ============
+         Shown only when three servers are configured; with two the header
+         control is a direct toggle and this never opens. renderServerSwitcher()
+         decides which. -->
+    <div class="sheet" x-show="serverOpen" x-cloak style="display:none"
+        x-transition:enter="overlay-opening" x-transition:enter-start="overlay-shut"
+        x-transition:enter-end="overlay-shown" x-transition:leave="overlay-closing"
+        x-transition:leave-start="overlay-shown" x-transition:leave-end="overlay-shut"
+        @keydown.escape.window="serverOpen = false">
+        <div class="sheet__backdrop" @click="serverOpen = false"></div>
+        <div class="sheet__panel" role="dialog" aria-modal="true" aria-label="Switch server"
+            tabindex="-1">
+            <div class="sheet__grip"><span class="sheet__handle"></span></div>
+            <div class="sheet__head">
+                <span class="sheet__title">Switch server</span>
+                <button class="overlay__close" @click="serverOpen = false"
+                    aria-label="Close">×</button>
+            </div>
+            <div class="sheet__body server-tray__body">
+                <!-- Populated from config.json by renderServerSwitcher(). -->
             </div>
         </div>
     </div>
@@ -1700,25 +1468,46 @@
     <!-- Swipe Indicator -->
     <div class="swipe-indicator"></div>
 
-    <!-- Modal -->
-    <div class="modal-overlay">
-        <div class="modal-content">
-            <div class="modal-backdrop"></div>
-            <button class="modal-close" aria-label="Close modal">×</button>
-            <div class="modal-header">
-                <div class="modal-poster">
-                    <!-- Poster will be populated dynamically -->
-                </div>
-                <div class="modal-title-section">
-                    <h2 class="modal-title">Movie Title</h2>
-                    <div class="modal-year">2023</div>
-                    <div class="modal-metadata">
-                        <div class="metadata-item" id="modal-rating">PG-13</div>
-                        <div class="metadata-item" id="modal-duration">120 min</div>
+    <!-- ============ Media detail ============
+         A tray on a phone, a centred dialog on a pointer device — the
+         `modal--tray-on-touch` modifier is what selects between them.
+
+         The previous presentation was a centred box at every width, which put
+         its close control in a top corner: the hardest part of a phone screen
+         to reach one-handed, and the reason the tray shape exists. On touch the
+         grab handle replaces that ×, and a downward swipe dismisses. -->
+    <div class="modal modal--tray-on-touch" x-show="detailOpen" x-cloak style="display:none"
+        x-transition:enter="overlay-opening" x-transition:enter-start="overlay-shut"
+        x-transition:enter-end="overlay-shown" x-transition:leave="overlay-closing"
+        x-transition:leave-start="overlay-shown" x-transition:leave-end="overlay-shut"
+        @keydown.escape.window="detailOpen = false">
+        <div class="modal__backdrop" @click="detailOpen = false"></div>
+        <div class="modal__panel modal__panel--wide" role="dialog" aria-modal="true"
+            aria-labelledby="detail-title" tabindex="-1">
+            <div class="sheet__grip"><span class="sheet__handle"></span></div>
+            <!-- The item's backdrop art, behind the head. Absolutely positioned
+                 and inert; it is texture, not content. -->
+            <div class="modal-backdrop-art" aria-hidden="true"></div>
+            <div class="modal__head">
+                <h2 id="detail-title" class="modal-title">Title</h2>
+                <button class="overlay__close" @click="detailOpen = false"
+                    aria-label="Close">×</button>
+            </div>
+            <div class="modal__body">
+                <div class="modal-header">
+                    <div class="modal-poster">
+                        <!-- Poster populated by openModal() -->
+                    </div>
+                    <div class="modal-title-section">
+                        <div class="modal-year">2023</div>
+                        <div class="modal-metadata">
+                            <div class="metadata-item" id="modal-rating">PG-13</div>
+                            <div class="metadata-item" id="modal-duration">120 min</div>
+                        </div>
+                        <div class="modal-actions"></div>
                     </div>
                 </div>
-            </div>
-            <div class="modal-body">
+
                 <div class="modal-section summary-section">
                     <div class="modal-section-title">Overview</div>
                     <div id="modal-summary">Loading summary...</div>
@@ -1727,17 +1516,16 @@
                 <div class="modal-section">
                     <div class="modal-section-title">Genres</div>
                     <div class="genres-list" id="modal-genres">
-                        <!-- Genres will be added here -->
+                        <!-- Genres populated by openModal() -->
                     </div>
                 </div>
 
                 <div class="modal-section">
                     <div class="modal-section-title">Cast</div>
                     <div class="cast-grid" id="modal-cast">
-                        <!-- Cast members will be added here -->
+                        <!-- Cast populated by openModal() -->
                     </div>
                 </div>
-
             </div>
         </div>
     </div>
@@ -1909,38 +1697,44 @@
                 const wrapper = button.closest('.server-toggle');
                 if (wrapper) wrapper.classList.add('configured');
 
-                button.onclick = others.length === 1
-                    ? () => switchToServer(target.id)
-                    : () => openServerMenu(button, others);
+                if (others.length === 1) {
+                    // Two servers: no choice to present, so present none.
+                    button.onclick = () => switchToServer(target.id);
+                    button.removeAttribute('aria-haspopup');
+                } else {
+                    button.setAttribute('aria-haspopup', 'dialog');
+                    button.onclick = () => {
+                        // Focus first, then close the Actions tray, then open
+                        // this one — see the note on the genre trigger in the
+                        // Actions tray markup. This button exists in both the
+                        // header and that tray; from inside the tray, opening
+                        // without moving focus first leaves the keyboard user
+                        // at the top of the page when the server tray closes.
+                        button.focus();
+                        setOverlay('menuOpen', false);
+                        setOverlay('serverOpen', true);
+                    };
+                }
             });
+
+            populateServerTray(others);
         }
 
-        /** With three servers there is a choice to present, so present one. */
-        function openServerMenu(trigger, others) {
-            document.querySelector('.server-menu')?.remove();
+        /** Fill the server tray from config.json. */
+        function populateServerTray(others) {
+            const body = document.querySelector('.server-tray__body');
+            if (!body) return;
 
-            const menu = document.createElement('div');
-            menu.className = 'genre-menu server-menu';
-            menu.style.display = 'block';
+            body.innerHTML = '';
             others.forEach(server => {
-                const item = document.createElement('div');
-                item.className = 'genre-item';
-                item.textContent = server.name;
-                item.onclick = () => switchToServer(server.id);
-                menu.appendChild(item);
+                const item = document.createElement('button');
+                item.type = 'button';
+                item.className = 'genre-item server-item';
+                item.innerHTML = '<span class="genre-item__label"></span>';
+                item.querySelector('.genre-item__label').textContent = server.name;
+                item.addEventListener('click', () => switchToServer(server.id));
+                body.appendChild(item);
             });
-
-            (trigger.closest('.server-toggle') || trigger.parentElement).appendChild(menu);
-
-            // Dismiss on the next click anywhere else.
-            setTimeout(() => {
-                document.addEventListener('click', function dismiss(event) {
-                    if (!menu.contains(event.target) && event.target !== trigger) {
-                        menu.remove();
-                        document.removeEventListener('click', dismiss);
-                    }
-                });
-            }, 0);
         }
 
         /**
@@ -2025,22 +1819,31 @@
             threshold: 0.01
         });
 
-        // Mobile menu functionality
-        const mobileMenuButton = document.querySelector('.mobile-menu-button');
-        const mobileMenu = document.querySelector('.mobile-menu');
+        /**
+         * Overlay open state lives in the Alpine scope on <body>.
+         *
+         * These helpers exist so the app's own code — which is not inside an
+         * Alpine expression — can open and close overlays without reaching for
+         * class toggles. The click-outside handlers, the "is it open" checks and
+         * the manual class juggling that used to live here are all gone: a
+         * backdrop click, Escape, and the swipe gesture are handled by the
+         * overlay system itself.
+         */
+        function overlayScope() {
+            return Alpine.$data(document.body);
+        }
 
-        mobileMenuButton.addEventListener('click', () => {
-            mobileMenu.classList.toggle('open');
-        });
+        function setOverlay(name, open) {
+            // Alpine may not have initialised on a very early call; there is no
+            // overlay to open yet in that case, so dropping it is correct.
+            if (typeof Alpine === 'undefined') return;
+            overlayScope()[name] = open;
+        }
 
-        // Close mobile menu when clicking outside
-        document.addEventListener('click', (e) => {
-            if (mobileMenu.classList.contains('open') &&
-                !mobileMenu.contains(e.target) &&
-                !mobileMenuButton.contains(e.target)) {
-                mobileMenu.classList.remove('open');
-            }
-        });
+        function isOverlayOpen(name) {
+            if (typeof Alpine === 'undefined') return false;
+            return overlayScope()[name] === true;
+        }
 
         // Function to switch tabs - UPDATED TO MAINTAIN GENRE FILTER
         function switchTab(contentName) {
@@ -2078,8 +1881,8 @@
             // Apply the current search and sort to the newly selected tab content
             filterAndSortMedia(currentSearchTerm);
 
-            // Close mobile menu if open
-            mobileMenu.classList.remove('open');
+            // Close the Actions tray if it is open
+            setOverlay('menuOpen', false);
 
             // Scroll to top when switching tabs
             window.scrollTo({
@@ -2153,12 +1956,10 @@
             // Update genre button label and active state - for both desktop and mobile
             document.querySelectorAll('.genre-button').forEach(button => {
                 if (genre !== 'all') {
-                    // Don't update the text of the mobile drawer button - it's always just "Genre"
-                    if (button.id !== 'mobile-genre-button') {
-                        button.innerHTML = `<span class="sort-icon">🏷️ <span class="selected-genre">${genre}</span></span>`;
-                    } else {
-                        button.innerHTML = `<span class="sort-icon">🏷️ ${genre}</span>`;
-                    }
+                    // One label for every genre trigger now. The drawer button
+                    // used to be special-cased to stay reading "Genre"; with a
+                    // single control at both widths there is nothing to diverge.
+                    button.innerHTML = `<span class="sort-icon">🏷️ <span class="selected-genre">${genre}</span></span>`;
                     button.classList.add('active');
                     document.body.classList.add('sort-by-genre');
                 } else {
@@ -2181,8 +1982,8 @@
             const currentSearchTerm = document.querySelector('.search-input').value.toLowerCase();
             filterAndSortMedia(currentSearchTerm);
 
-            // Close genre drawer if it's open
-            closeGenreDrawer();
+            // Choosing a genre dismisses the tray.
+            setOverlay('genreOpen', false);
         }
 
         // Add event listeners to sort buttons
@@ -2191,8 +1992,8 @@
                 button.addEventListener('click', () => {
                     setSortMethod(button.dataset.sort);
 
-                    // Close mobile menu if open
-                    mobileMenu.classList.remove('open');
+                    // Close the Actions tray if it is open
+                    setOverlay('menuOpen', false);
 
                     // Scroll to top when sort method changes
                     window.scrollTo({
@@ -2203,92 +2004,19 @@
             }
         });
 
-        // Handle desktop genre dropdown button clicks
-        document.querySelectorAll('.genre-dropdown .genre-button').forEach(button => {
-            button.addEventListener('click', (e) => {
-                if (checkMobileView()) {
-                    // On mobile, we'll use the drawer instead
-                    return;
-                }
+        /* The desktop dropdown's positioning logic, the mobile drawer's open and
+           close functions, the click-outside handler and the manual body-overflow
+           toggle all lived here. All of it is gone.
 
-                // Toggle the desktop genre dropdown
-                const dropdown = button.closest('.genre-dropdown');
-                const menu = dropdown.querySelector('.genre-menu');
+           The genre filter is one tray now, opened declaratively by its trigger.
+           Backdrop dismissal, Escape, the swipe gesture and the scroll lock come
+           from the overlay system, so none of them is this file's problem — and
+           the overflow-clamping fallback is not needed by an overlay that is
+           centred or docked rather than anchored to a button. */
 
-                // Close other dropdowns first
-                document.querySelectorAll('.genre-menu.show').forEach(m => {
-                    if (m !== menu) {
-                        m.classList.remove('show');
-                    }
-                });
-
-                // Check if dropdown would overflow the window and adjust position
-                setTimeout(() => {
-                    const menuRect = menu.getBoundingClientRect();
-                    const windowWidth = window.innerWidth;
-
-                    // Only needed as a fallback if CSS positioning doesn't work
-                    if (menuRect.right > windowWidth) {
-                        menu.style.left = 'auto';
-                        menu.style.right = '0';
-                    }
-                }, 0);
-
-                menu.classList.toggle('show');
-                e.stopPropagation(); // Prevent the document click handler from immediately closing it
-            });
-        });
-
-        // Mobile genre drawer functionality
-        const genreDrawerOverlay = document.querySelector('.genre-drawer-overlay');
-        const genreDrawer = document.querySelector('.genre-drawer');
-        const mobileGenreButton = document.getElementById('mobile-genre-button');
-        const genreDrawerClose = document.querySelector('.genre-drawer-close');
-
-        // Open genre drawer on mobile
-        mobileGenreButton.addEventListener('click', () => {
-            openGenreDrawer();
-
-            // Close mobile menu if open
-            mobileMenu.classList.remove('open');
-        });
-
-        // Close genre drawer when clicking the close button
-        genreDrawerClose.addEventListener('click', closeGenreDrawer);
-
-        // Close genre drawer when clicking the overlay
-        genreDrawerOverlay.addEventListener('click', (e) => {
-            if (e.target === genreDrawerOverlay) {
-                closeGenreDrawer();
-            }
-        });
-
-        // Function to open the genre drawer
-        function openGenreDrawer() {
-            // Make sure drawer content is up to date
-            const activeTab = document.querySelector('.tab.active').dataset.content;
-            updateGenreDrawer(activeTab);
-
-            genreDrawerOverlay.classList.add('open');
-            genreDrawer.classList.add('open');
-            document.body.style.overflow = 'hidden'; // Prevent background scrolling
-        }
-
-        // Function to close the genre drawer
-        function closeGenreDrawer() {
-            genreDrawerOverlay.classList.remove('open');
-            genreDrawer.classList.remove('open');
-            document.body.style.overflow = ''; // Restore scrolling
-        }
-
-        // Close desktop genre dropdown when clicking outside
-        document.addEventListener('click', (e) => {
-            if (!e.target.closest('.genre-dropdown')) {
-                document.querySelectorAll('.genre-menu').forEach(menu => {
-                    menu.classList.remove('show');
-                });
-            }
-        });
+        /* No "refresh on open" hook. updateGenreUI() already runs on load and on
+           every tab switch, which are the only two things that change the list,
+           so the tray's contents are current before it can be opened. */
 
         // Function to extract and count all unique genres from media data
         function extractGenres(mediaData, type) {
@@ -2313,55 +2041,60 @@
                     return result;
                 }, {});
         }
+        /**
+         * Build the genre tray's list for a content type.
+         *
+         * This replaces updateGenreDropdown() and updateGenreDrawer(), which
+         * were the same function written twice — one for the desktop dropdown,
+         * one for the phone drawer — and had already drifted: the drawer showed
+         * counts the dropdown did not, and the two disagreed about how the
+         * trigger should be labelled. One control, one builder.
+         */
+        function updateGenreList(type) {
+            const genres = allGenres[type] || {};
+            const body = document.querySelector('.genre-tray__body');
+            if (!body) return;
 
-        // Function to update desktop genre dropdown with available genres
-        function updateGenreDropdown(type) {
-            const genres = allGenres[type];
-            const dropdowns = document.querySelectorAll('.genre-menu');
+            body.innerHTML = '';
 
-            // Update genre menus (desktop only)
-            dropdowns.forEach(dropdown => {
-                // Keep the "All Genres" item
-                dropdown.innerHTML = `<div class="genre-item ${currentGenre === 'all' ? 'active' : ''}" data-genre="all">All Genres</div>`;
+            const total = Object.values(genres).reduce((sum, n) => sum + n, 0);
+            body.appendChild(genreItem('all', 'All Genres', total));
 
-                // Add each genre with count
-                Object.entries(genres).forEach(([genre, count]) => {
-                    const genreItem = document.createElement('div');
-                    genreItem.className = `genre-item ${currentGenre === genre ? 'active' : ''}`;
-                    genreItem.dataset.genre = genre;
-                    genreItem.innerHTML = `${genre} <span class="genre-badge">${count}</span>`;
-                    dropdown.appendChild(genreItem);
-                });
+            Object.keys(genres)
+                .sort((a, b) => a.localeCompare(b))
+                .forEach(genre => body.appendChild(genreItem(genre, genre, genres[genre])));
+
+            updateGenreTriggers();
+        }
+
+        /** One row in the genre tray. */
+        function genreItem(value, label, count) {
+            const item = document.createElement('button');
+            item.type = 'button';
+            item.className = 'genre-item' + (currentGenre === value ? ' active' : '');
+            item.dataset.genre = value;
+            // aria-pressed rather than a class alone: the active genre is state,
+            // and a class is invisible to a screen reader.
+            item.setAttribute('aria-pressed', String(currentGenre === value));
+            item.innerHTML = `<span class="genre-item__label"></span>` +
+                `<span class="genre-item__count"></span>`;
+            item.querySelector('.genre-item__label').textContent = label;
+            item.querySelector('.genre-item__count').textContent = count ? String(count) : '';
+
+            item.addEventListener('click', () => {
+                setGenreFilter(value);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
             });
+            return item;
+        }
 
-            // Add click event listeners to desktop genre items
-            document.querySelectorAll('.genre-menu .genre-item').forEach(item => {
-                item.addEventListener('click', () => {
-                    setGenreFilter(item.dataset.genre);
-
-                    // Close dropdown
-                    document.querySelectorAll('.genre-menu').forEach(menu => {
-                        menu.classList.remove('show');
-                    });
-
-                    // Scroll to top
-                    window.scrollTo({
-                        top: 0,
-                        behavior: 'smooth'
-                    });
-                });
-            });
-
-            // Set button text based on current selection
+        /** Label every genre trigger with the active selection. */
+        function updateGenreTriggers() {
             document.querySelectorAll('.genre-button').forEach(button => {
                 if (currentGenre !== 'all') {
-                    if (button.id === 'mobile-genre-button') {
-                        // For mobile button, show genre name directly
-                        button.innerHTML = `<span class="sort-icon">🏷️ ${currentGenre}</span>`;
-                    } else {
-                        // Desktop buttons get the nested span structure
-                        button.innerHTML = `<span class="sort-icon">🏷️ <span class="selected-genre">${currentGenre}</span></span>`;
-                    }
+                    button.innerHTML =
+                        `<span class="sort-icon">🏷️ <span class="selected-genre"></span></span>`;
+                    button.querySelector('.selected-genre').textContent = currentGenre;
                     button.classList.add('active');
                 } else {
                     button.innerHTML = `<span class="sort-icon">🏷️ Genre</span>`;
@@ -2370,46 +2103,9 @@
             });
         }
 
-        // Function to update mobile genre drawer with available genres
-        function updateGenreDrawer(type) {
-            const genres = allGenres[type];
-            const drawerContent = document.querySelector('.genre-drawer-content');
-
-            // Clear current content
-            drawerContent.innerHTML = '';
-
-            // Add "All Genres" item
-            const allGenresItem = document.createElement('div');
-            allGenresItem.className = `genre-item ${currentGenre === 'all' ? 'active' : ''}`;
-            allGenresItem.dataset.genre = 'all';
-            allGenresItem.innerHTML = 'All Genres';
-            drawerContent.appendChild(allGenresItem);
-
-            // Add each genre with count
-            Object.entries(genres).forEach(([genre, count]) => {
-                const genreItem = document.createElement('div');
-                genreItem.className = `genre-item ${currentGenre === genre ? 'active' : ''}`;
-                genreItem.dataset.genre = genre;
-                genreItem.innerHTML = `${genre} <span class="genre-badge">${count}</span>`;
-                drawerContent.appendChild(genreItem);
-            });
-
-            // Update drawer title
-            const drawerTitle = document.querySelector('.genre-drawer-title');
-            drawerTitle.textContent = `${type === 'movies' ? 'Movie' : 'TV Show'} Genres`;
-
-            // Add click event listeners to drawer genre items
-            document.querySelectorAll('.genre-drawer-content .genre-item').forEach(item => {
-                item.addEventListener('click', () => {
-                    setGenreFilter(item.dataset.genre);
-                });
-            });
-        }
-
-        // Combined function to update both genre UI components
+        // Kept as the name the rest of the file calls.
         function updateGenreUI(type) {
-            updateGenreDropdown(type);
-            updateGenreDrawer(type);
+            updateGenreList(type);
         }
 
         // Enhanced search functionality
@@ -2607,11 +2303,6 @@
                 noResultsDiv.classList.add('active');
                 grid.style.display = 'none';
 
-                // Make sure genre dropdown or drawer gets closed when showing no results
-                document.querySelectorAll('.genre-menu').forEach(menu => {
-                    menu.classList.remove('show');
-                });
-
                 return;
             }
 
@@ -2672,9 +2363,8 @@
             });
         }
 
-        // Modal functionality
-        const modalOverlay = document.querySelector('.modal-overlay');
-        const modalClose = document.querySelector('.modal-close');
+        // Detail overlay. Open state lives in the Alpine scope; the close
+        // button, backdrop and Escape are wired in the markup.
 
         // Function to open modal with media details
         function openModal(item, type) {
@@ -2896,54 +2586,27 @@
                 dateAddedElem.textContent = dateAdded;
             }
 
-            // Make sure any previous modal content is reset before showing new modal
-            const modalBody = document.querySelector('.modal-body');
-            modalBody.scrollTop = 0;
+            // A reused overlay keeps the previous item's scroll position, so
+            // the next item opens part-way down its own summary.
+            //
+            // The three nested timeouts and the forced reflow that used to be
+            // here were fighting the old presentation: the panel animated from a
+            // transform, and reading scrollTop mid-animation on a phone gave the
+            // pre-animation value. The panel no longer scrolls — its body does,
+            // and the body is not what moves — so one reset before it is shown
+            // is enough.
+            const modalBody = document.querySelector('.modal .modal__body');
+            if (modalBody) modalBody.scrollTop = 0;
 
-            // Show modal with animation
-            document.body.style.overflow = 'hidden'; // Prevent background scrolling
-            modalOverlay.classList.add('active');
-
-            // Double attempt to reset scroll after modal is visible
-            // This addresses timing issues on mobile devices
-            setTimeout(() => {
-                // First reset
-                modalBody.scrollTop = 0;
-
-                // Second delayed reset with forced reflow (critical for mobile browsers)
-                setTimeout(() => {
-                    modalBody.scrollTop = 0;
-                    // Force layout recalculation on mobile
-                    void modalBody.offsetHeight;
-                }, 50);
-            }, 10);
+            setOverlay('detailOpen', true);
         }
 
-        // Close modal functionality
-        modalClose.addEventListener('click', function (e) {
-            e.preventDefault(); // Prevent event propagation
-            e.stopPropagation(); // Stop event bubbling
-            closeModal();
-        });
-
-        // Close modal when clicking outside
-        modalOverlay.addEventListener('click', (e) => {
-            if (e.target === modalOverlay) {
-                closeModal();
-            }
-        });
-
-        // Close modal with escape key
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && modalOverlay.classList.contains('active')) {
-                closeModal();
-            }
-        });
-
-        // Function to close the modal
+        /* The close button, backdrop click and Escape are all declared in the
+           markup, and the scroll lock is the overlay system's. What was thirty
+           lines of listeners is now this one function, kept because the rest of
+           the file calls it by name. */
         function closeModal() {
-            modalOverlay.classList.remove('active');
-            document.body.style.overflow = ''; // Restore scrolling
+            setOverlay('detailOpen', false);
         }
 
         // Initialize on page load.
@@ -3067,8 +2730,10 @@
 
                 // Check if swipe is horizontal enough (angle less than threshold)
                 if (angle < swipeAngleThreshold) {
-                    // Don't process swipes when modal is open
-                    if (modalOverlay.classList.contains('active')) {
+                    // A swipe inside an overlay belongs to that overlay — the
+                    // tray's own dismiss gesture, or a scroll in its body — not
+                    // to the tab switcher behind it.
+                    if (isOverlayOpen('detailOpen')) {
                         return;
                     }
 
@@ -3271,9 +2936,7 @@
 
                 newMobileButton.addEventListener('click', (e) => {
                     handleInstall(e);
-                    // Also close the mobile menu
-                    const mobileMenu = document.querySelector('.mobile-menu');
-                    mobileMenu.classList.remove('open');
+                    setOverlay('menuOpen', false);
                 });
             }
         });
@@ -3338,19 +3001,33 @@
         document.head.appendChild(style);
     </script>
 
-    <!-- Add this at the end of the body, just before the closing </body> tag -->
+    <!-- ============ Trailer ============
+         A dialog at EVERY width, deliberately not a tray. A trailer is sized to
+         its video's aspect ratio rather than to the screen, and a tray's job is
+         to fill a screen's width — docking a 16:9 frame to the bottom edge
+         would letterbox it against a panel it does not fill.
 
-    <!-- Trailer Modal -->
-    <div class="trailer-modal-overlay">
-        <div class="trailer-modal-content">
-            <button class="trailer-modal-close" aria-label="Close trailer">×</button>
+         `closeTrailer()` clears the iframe: dismissing the overlay without
+         removing it leaves the audio playing behind a closed dialog. -->
+    <div class="modal" x-show="trailerOpen" x-cloak style="display:none"
+        x-transition:enter="overlay-opening" x-transition:enter-start="overlay-shut"
+        x-transition:enter-end="overlay-shown" x-transition:leave="overlay-closing"
+        x-transition:leave-start="overlay-shown" x-transition:leave-end="overlay-shut"
+        @keydown.escape.window="if (trailerOpen) closeTrailer()">
+        <div class="modal__backdrop" @click="closeTrailer()"></div>
+        <div class="modal__panel modal__panel--video" role="dialog" aria-modal="true"
+            aria-label="Trailer" tabindex="-1">
+            <div class="modal__head">
+                <h2>Trailer</h2>
+                <button class="overlay__close" @click="closeTrailer()"
+                    aria-label="Close trailer">×</button>
+            </div>
             <div class="trailer-container">
-                <!-- Loading indicator will be inserted here -->
                 <div class="trailer-loading">
                     <div class="trailer-spinner"></div>
                     <div class="trailer-loading-text">Loading trailer...</div>
                 </div>
-                <!-- Iframe will be inserted here dynamically -->
+                <!-- Iframe inserted by openTrailer() -->
             </div>
         </div>
     </div>
@@ -3391,35 +3068,6 @@
             width: 20px;
             height: 20px;
             fill: currentColor;
-        }
-
-
-        /* Trailer Modal */
-        .trailer-modal-overlay {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.9);
-            z-index: 2000;
-            align-items: center;
-            justify-content: center;
-            opacity: 0;
-            transition: opacity var(--transition-speed) ease;
-        }
-
-        .trailer-modal-overlay.active {
-            display: flex;
-            opacity: 1;
-        }
-
-        .trailer-modal-content {
-            position: relative;
-            width: 90%;
-            max-width: 1000px;
-            background-color: transparent;
         }
 
         .trailer-container {
@@ -3489,55 +3137,6 @@
             visibility: hidden;
         }
 
-        .trailer-modal-close {
-            position: absolute;
-            top: -40px;
-            right: 0px;
-            width: 36px;
-            height: 36px;
-            border-radius: 50%;
-            background-color: rgba(0, 0, 0, 0.7);
-            border: 2px solid rgba(255, 255, 255, 0.3);
-            color: var(--light-text);
-            font-size: 20px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: background-color var(--transition-speed);
-            z-index: 20;
-            /* Higher than iframe */
-        }
-
-        .trailer-modal-close:hover {
-            background-color: rgba(255, 255, 255, 0.2);
-        }
-
-        /* Improved mobile styling */
-        @media screen and (max-width: 768px) {
-            .trailer-modal-content {
-                width: 95%;
-            }
-
-            .trailer-modal-close {
-                /* Position in the top-right corner of the video container */
-                right: 0px;
-                /* Make the button larger and more visible */
-                top: -45px;
-                width: 40px;
-                height: 40px;
-                font-size: 24px;
-                /* Add more contrast */
-                background-color: rgba(0, 0, 0, 0.7);
-                z-index: 25;
-                /* Ensure it's above the video */
-            }
-
-            .trailer-spinner {
-                width: 40px;
-                height: 40px;
-            }
-        }
     </style>
 
     <script>
@@ -3564,18 +3163,17 @@
 `;
             modalTitleSection.appendChild(modalActions);
 
-            // Get trailer modal elements
-            const trailerModalOverlay = document.querySelector('.trailer-modal-overlay');
+            // The overlay's own close button, backdrop and Escape handling are
+            // declared in the markup and call closeTrailer(); only the pieces
+            // this code writes into are needed here.
             const trailerContainer = document.querySelector('.trailer-container');
-            const trailerModalClose = document.querySelector('.trailer-modal-close');
-            const trailerModalContent = document.querySelector('.trailer-modal-content');
             const trailerLoading = document.querySelector('.trailer-loading');
 
             // Check if we're on a mobile device
             const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || window.innerWidth < 768;
 
             // Function to open trailer modal with the correct title and year
-            function openTrailerModal(title, year) {
+            function openTrailer(title, year) {
                 // Show the loading indicator
                 trailerLoading.classList.remove('hidden');
 
@@ -3585,9 +3183,7 @@
                     existingIframe.remove();
                 }
 
-                // Show trailer modal
-                document.body.style.overflow = 'hidden'; // Prevent background scrolling
-                trailerModalOverlay.classList.add('active');
+                setOverlay('trailerOpen', true);
 
                 // Create iframe with the movie title AND year
                 const encodedTitle = encodeURIComponent(title);
@@ -3633,54 +3229,37 @@
                 }, 3000); // Reduced timeout to 3 seconds
             }
 
-            // Function to close trailer modal
-            function closeTrailerModal() {
-                trailerModalOverlay.classList.remove('active');
+            /**
+             * Close the trailer and stop it playing.
+             *
+             * Removing the iframe is the part that matters: hiding the overlay
+             * alone leaves a YouTube embed playing, so the user dismisses the
+             * trailer and the audio carries on from nowhere. It is removed after
+             * the leave transition so the video does not vanish mid-fade.
+             *
+             * No scroll-lock bookkeeping here any more. This used to restore
+             * body overflow only if the detail overlay was not also open —
+             * a condition that had to be right in two places. The overlay system
+             * counts open overlays itself, so the page stays locked while the
+             * detail overlay remains up.
+             */
+            function closeTrailer() {
+                setOverlay('trailerOpen', false);
 
-                // Only restore scrolling if the main modal is not open
-                if (!modalOverlay.classList.contains('active')) {
-                    document.body.style.overflow = '';
-                }
-
-                // Remove iframe after animation completes to stop playback
                 setTimeout(() => {
-                    if (!trailerModalOverlay.classList.contains('active')) {
-                        // Reset the loading indicator for next time
-                        trailerLoading.classList.remove('hidden');
-                        trailerLoading.innerHTML = `
-                <div class="trailer-spinner"></div>
-                <div class="trailer-loading-text">Loading trailer...</div>
-            `;
+                    if (isOverlayOpen('trailerOpen')) return;
 
-                        // Remove the iframe to stop playback
-                        const existingIframe = trailerContainer.querySelector('iframe');
-                        if (existingIframe) {
-                            existingIframe.remove();
-                        }
-                    }
+                    trailerLoading.classList.remove('hidden');
+                    trailerLoading.innerHTML =
+                        '<div class="trailer-spinner"></div>' +
+                        '<div class="trailer-loading-text">Loading trailer...</div>';
+
+                    const existingIframe = trailerContainer.querySelector('iframe');
+                    if (existingIframe) existingIframe.remove();
                 }, 300);
             }
-
-            // Close trailer modal when clicking the close button
-            trailerModalClose.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                closeTrailerModal();
-            });
-
-            // Close trailer modal when clicking outside
-            trailerModalOverlay.addEventListener('click', (e) => {
-                if (e.target === trailerModalOverlay) {
-                    closeTrailerModal();
-                }
-            });
-
-            // Close trailer modal with escape key
-            document.addEventListener('keydown', (e) => {
-                if (e.key === 'Escape' && trailerModalOverlay.classList.contains('active')) {
-                    closeTrailerModal();
-                }
-            });
+            // Called from the markup's @click handlers.
+            window.closeTrailer = closeTrailer;
 
             // Store reference to the original openModal function
             const originalOpenModal = window.openModal;
@@ -3697,9 +3276,16 @@
                 if (type === 'movies') {
                     trailerBtn.style.display = 'flex';
 
-                    // Add click event to open trailer with both title and year
+                    // Focus moves to this button BEFORE the trailer opens.
+                    // The trailer is raised from inside the detail overlay, and
+                    // the focus manager records where focus was when it opened;
+                    // if that is the document body — which is what a touch tap
+                    // leaves behind — it declines to restore, and dismissing the
+                    // trailer drops the keyboard user at the top of the page
+                    // instead of back here. Nothing errors.
                     trailerBtn.onclick = () => {
-                        openTrailerModal(item.title, item.year);
+                        trailerBtn.focus();
+                        openTrailer(item.title, item.year);
                     };
                 } else {
                     trailerBtn.style.display = 'none';
@@ -3714,9 +3300,11 @@
                 // Call the original function first
                 originalCloseModal();
 
-                // Also close trailer modal if it's open
-                if (trailerModalOverlay.classList.contains('active')) {
-                    closeTrailerModal();
+                // Dismissing the detail overlay takes the trailer with it —
+                // otherwise the trailer is left floating over the library with
+                // nothing behind it, still playing.
+                if (isOverlayOpen('trailerOpen')) {
+                    closeTrailer();
                 }
             };
         });
@@ -3724,9 +3312,23 @@
 
     <!-- Roulette Button HTML will be injected into the header -->
 
-    <!-- Roulette Modal Overlay -->
-    <div class="roulette-overlay">
-        <div class="roulette-modal">
+    <!-- ============ Roulette ============
+         A dialog at every width: it is a brief status overlay sized to a
+         spinner, not something to fill a screen with.
+
+         No backdrop dismissal while it is choosing — the overlay is gone within
+         a couple of seconds either way, and a stray tap cancelling a pick the
+         user just asked for reads as the control not working. When it has
+         nothing to pick it says so and offers Close, rather than vanishing
+         silently, which is indistinguishable from a broken button. -->
+    <div class="modal" x-show="rouletteOpen" x-cloak style="display:none"
+        x-transition:enter="overlay-opening" x-transition:enter-start="overlay-shut"
+        x-transition:enter-end="overlay-shown" x-transition:leave="overlay-closing"
+        x-transition:leave-start="overlay-shown" x-transition:leave-end="overlay-shut"
+        @keydown.escape.window="rouletteOpen = false">
+        <div class="modal__backdrop"></div>
+        <div class="modal__panel roulette-modal" role="dialog" aria-modal="true"
+            aria-label="Choosing something to watch" aria-live="polite" tabindex="-1">
             <div class="roulette-spinner-container">
                 <div class="roulette-spinner">
                     <div class="spinner-item"></div>
@@ -3735,9 +3337,8 @@
                 </div>
                 <div class="finding-text">Finding something for you...</div>
             </div>
-            <!-- Error buttons only shown when needed -->
             <div class="roulette-error-buttons" style="display: none;">
-                <button class="roulette-close-btn">Close</button>
+                <button class="roulette-close-btn" @click="rouletteOpen = false">Close</button>
             </div>
         </div>
     </div>
@@ -3797,28 +3398,6 @@
             }
         }
 
-        /* Roulette Overlay Styles */
-        .roulette-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.85);
-            z-index: 1500;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            opacity: 0;
-            visibility: hidden;
-            transition: opacity 0.3s ease, visibility 0.3s ease;
-        }
-
-        .roulette-overlay.active {
-            opacity: 1;
-            visibility: visible;
-        }
-
         .roulette-modal {
             background-color: var(--secondary-bg);
             border-radius: 16px;
@@ -3829,10 +3408,6 @@
             box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
             transform: translateY(30px);
             transition: transform 0.3s ease;
-        }
-
-        .roulette-overlay.active .roulette-modal {
-            transform: translateY(0);
         }
 
         /* Spinner Animation */
@@ -3923,21 +3498,13 @@
                 padding: 20px 10px;
             }
         }
-
-        /* Hide when modal is open */
-        .modal-overlay.active~.roulette-button,
-        .trailer-modal-overlay.active~.roulette-button,
-        .roulette-overlay.active~.roulette-button {
-            opacity: 0.5;
-            pointer-events: none;
-        }
     </style>
 
     <script>
         if (window.GLIMPSE.failed) { throw new Error('Glimpse: configuration unavailable.'); }
         document.addEventListener('DOMContentLoaded', function () {
             // Get elements
-            const rouletteOverlay = document.querySelector('.roulette-overlay');
+            // Backdrop, Escape and the Close button are declared in the markup.
             const rouletteModal = document.querySelector('.roulette-modal');
             const errorButtons = document.querySelector('.roulette-error-buttons');
             const findingText = document.querySelector('.finding-text');
@@ -4044,9 +3611,7 @@
                     selectedIndices.clear();
                 }
 
-                // Show the overlay
-                rouletteOverlay.classList.add('active');
-                document.body.style.overflow = 'hidden'; // Prevent background scrolling
+                setOverlay('rouletteOpen', true);
 
                 // Start the roulette animation
                 startRouletteAnimation();
@@ -4156,29 +3721,17 @@
 
             // Function to close the roulette overlay
             function closeRoulette() {
-                rouletteOverlay.classList.remove('active');
-                document.body.style.overflow = ''; // Restore scrolling
-
-                // Hide error buttons if they were shown
+                setOverlay('rouletteOpen', false);
+                // Reset the "nothing to pick" state so the next run opens on the
+                // spinner rather than on the previous failure.
                 errorButtons.style.display = 'none';
             }
+            window.closeRoulette = closeRoulette;
 
             // Button click event listeners
             // Note: the button click event is now added during button creation
 
-            // Close on overlay click
-            rouletteOverlay.addEventListener('click', function (e) {
-                if (e.target === rouletteOverlay) {
-                    closeRoulette();
-                }
-            });
 
-            // Close with Escape key
-            document.addEventListener('keydown', function (e) {
-                if (e.key === 'Escape' && rouletteOverlay.classList.contains('active')) {
-                    closeRoulette();
-                }
-            });
 
             // Add a button to the modal to try again
             function addTryAgainToModal() {

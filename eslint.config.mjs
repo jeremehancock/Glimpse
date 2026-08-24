@@ -3,10 +3,17 @@ import globals from 'globals';
 
 export default [
   {
-    // The legacy single-file app. Its JavaScript lives inline in index.html,
-    // which ESLint does not read, and sw.js/offline.html are written against it.
-    // The rewrite replaces all three; these entries go with them.
-    ignores: ['web/index.html', 'web/sw.js', 'web/offline.html', 'node_modules/**'],
+    ignores: [
+      // Vendored, minified, third-party. Not ours to lint or to reformat, and
+      // the only correct way to change it is to drop in a new release.
+      'web/assets/alpine.min.js',
+      // The legacy single-file app. Its JavaScript lives inline in index.html,
+      // which ESLint does not read. The frontend rewrite that splits it into
+      // modules removes this entry.
+      'web/index.html',
+      'web/offline.html',
+      'node_modules/**',
+    ],
   },
   js.configs.recommended,
   {

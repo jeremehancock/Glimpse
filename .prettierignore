@@ -19,11 +19,14 @@ openspec
 # churn a file every install has a copy of. See CLAUDE.md.
 docker-compose.yml
 
+# Vendored, minified, third-party. Changed only by dropping in a new release.
+web/assets/alpine.min.js
+
 # The legacy single-file app. 4,000 lines of HTML with inline <style> and
 # <script>, hand-formatted over years. Reformatting it would produce an enormous
-# diff on files the rewrite deletes. These entries are removed with them.
+# diff on a file the frontend rewrite splits into modules. This entry goes with
+# it. (sw.js came off this list when the overlay work touched it.)
 web/index.html
-web/sw.js
 web/offline.html
 
 # Generated at container start by config/entrypoint.sh; never authored here.

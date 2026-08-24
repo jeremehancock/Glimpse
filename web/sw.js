@@ -5,8 +5,8 @@
 // physically different index.html, so a client upgrading from v7.3 may hold a
 // cached page with a theme and data paths baked into its markup. Those entries
 // have to be discarded, and changing the cache name is what discards them.
-const CACHE_NAME = "glimpse-media-viewer-v8.0";
-const DYNAMIC_CACHE = "glimpse-media-dynamic-v8.0";
+const CACHE_NAME = 'glimpse-media-viewer-v8.1';
+const DYNAMIC_CACHE = 'glimpse-media-dynamic-v8.1';
 
 // Assets to cache on install.
 //
@@ -14,28 +14,41 @@ const DYNAMIC_CACHE = "glimpse-media-dynamic-v8.0";
 // cached under a version that changes when the scheme does — not held forever.
 // (/test.html used to be here; it was a debug page the old entrypoint wrote
 // into the web root, and it no longer exists.)
-const STATIC_ASSETS = ["/manifest.json"];
+const STATIC_ASSETS = [
+  '/manifest.json',
+  // The overlay system. Alpine especially: it is vendored rather than fetched
+  // from a CDN precisely so the app keeps working offline, and that only holds
+  // if it is cached alongside everything else.
+  '/assets/alpine.min.js',
+  '/assets/overlays.js',
+  '/assets/tokens.css',
+  '/assets/overlays.css',
+  // The offline fallback itself. Cached here rather than inlined into this file
+  // as a template literal, which is what it used to be — see the note further
+  // down about the copy that went stale.
+  '/offline.html',
+];
 
 // Install event - cache static assets
-self.addEventListener("install", (event) => {
-  console.log("Service Worker: Installing");
+self.addEventListener('install', (event) => {
+  console.log('Service Worker: Installing');
   event.waitUntil(
     caches
       .open(CACHE_NAME)
       .then((cache) => {
-        console.log("Service Worker: Caching static files");
+        console.log('Service Worker: Caching static files');
         return cache.addAll(STATIC_ASSETS);
       })
       .then(() => {
-        console.log("Service Worker: All static assets added to cache");
+        console.log('Service Worker: All static assets added to cache');
         return self.skipWaiting(); // Ensure the new service worker activates right away
-      })
+      }),
   );
 });
 
 // Activate event - clean up old caches
-self.addEventListener("activate", (event) => {
-  console.log("Service Worker: Activating");
+self.addEventListener('activate', (event) => {
+  console.log('Service Worker: Activating');
   event.waitUntil(
     caches
       .keys()
@@ -44,21 +57,21 @@ self.addEventListener("activate", (event) => {
           cacheNames
             .filter((cacheName) => {
               return (
-                cacheName.startsWith("glimpse-media-") &&
+                cacheName.startsWith('glimpse-media-') &&
                 cacheName !== CACHE_NAME &&
                 cacheName !== DYNAMIC_CACHE
               );
             })
             .map((cacheName) => {
-              console.log("Service Worker: Clearing old cache:", cacheName);
+              console.log('Service Worker: Clearing old cache:', cacheName);
               return caches.delete(cacheName);
-            })
+            }),
         );
       })
       .then(() => {
-        console.log("Service Worker: Claiming clients");
+        console.log('Service Worker: Claiming clients');
         return self.clients.claim(); // Take control of all clients
-      })
+      }),
   );
 });
 
@@ -75,8 +88,8 @@ function isAppShellRequest(request) {
   const pathname = url.pathname;
 
   return (
-    pathname === "/" ||
-    pathname === "/index.html" ||
+    pathname === '/' ||
+    pathname === '/index.html' ||
     /^\/(plex|jellyfin|emby)\/(index\.html)?$/.test(pathname)
   );
 }
@@ -86,26 +99,21 @@ function isAppShellRequest(request) {
 // it the request falls through to the cache-first strategy and a container
 // restart with new settings would never be seen by an installed client.
 function isConfigRequest(request) {
-  return new URL(request.url).pathname === "/config.json";
+  return new URL(request.url).pathname === '/config.json';
 }
 
 // Check if request is for JSON data files (these need fresh data)
 function isJsonDataRequest(request) {
-  return request.url.includes("/data/") && request.url.endsWith(".json");
+  return request.url.includes('/data/') && request.url.endsWith('.json');
 }
 
 // Check if request is for image files (these can be cached more aggressively)
 function isImageDataRequest(request) {
-  return request.url.includes("/data/") && request.url.endsWith(".jpg");
-}
-
-// Check if request is for dynamic media data
-function isMediaDataRequest(request) {
-  return isJsonDataRequest(request) || isImageDataRequest(request);
+  return request.url.includes('/data/') && request.url.endsWith('.jpg');
 }
 
 // Fetch event - serve from cache or network
-self.addEventListener("fetch", (event) => {
+self.addEventListener('fetch', (event) => {
   // Skip cross-origin requests
   if (!event.request.url.startsWith(self.location.origin)) {
     return;
@@ -144,27 +152,27 @@ self.addEventListener("fetch", (event) => {
 // Always fetch fresh strategy for JSON data
 async function alwaysFreshStrategy(request) {
   try {
-    console.log("Fetching fresh data:", request.url);
+    console.log('Fetching fresh data:', request.url);
     const response = await fetch(request, {
-      cache: "no-store", // Bypass all caches
+      cache: 'no-store', // Bypass all caches
       headers: {
-        "Cache-Control": "no-cache, no-store, must-revalidate",
-        Pragma: "no-cache",
-        Expires: "0",
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        Pragma: 'no-cache',
+        Expires: '0',
       },
     });
 
     if (response.ok) {
-      console.log("Fresh data fetched successfully:", request.url);
+      console.log('Fresh data fetched successfully:', request.url);
       return response;
     }
 
     // If fresh fetch fails, try cache as fallback
-    console.log("Fresh fetch failed, trying cache:", request.url);
+    console.log('Fresh fetch failed, trying cache:', request.url);
     const cachedResponse = await caches.match(request);
     return cachedResponse || response;
   } catch (error) {
-    console.log("Network error, trying cache:", request.url);
+    console.log('Network error, trying cache:', request.url);
     const cachedResponse = await caches.match(request);
     if (cachedResponse) {
       return cachedResponse;
@@ -186,57 +194,34 @@ async function staleWhileRevalidateStrategy(request) {
       }
       return response;
     })
-    .catch((error) => {
-      console.log("Background fetch failed for image:", request.url);
+    .catch(() => {
+      console.log('Background fetch failed for image:', request.url);
       return null;
     });
 
   // Return cached version immediately if available, otherwise wait for network
   if (cachedResponse) {
-    console.log("Serving cached image while revalidating:", request.url);
+    console.log('Serving cached image while revalidating:', request.url);
     fetchPromise; // Fire and forget
     return cachedResponse;
   } else {
-    console.log("No cached image, waiting for network:", request.url);
+    console.log('No cached image, waiting for network:', request.url);
     return fetchPromise;
   }
 }
 
-// Always fetch fresh strategy for JSON data (no caching)
-async function alwaysFreshStrategy(request) {
-  try {
-    console.log("Fetching fresh JSON data:", request.url);
-    const response = await fetch(request, {
-      cache: "no-store", // Bypass all browser caches
-      headers: {
-        "Cache-Control": "no-cache, no-store, must-revalidate",
-        Pragma: "no-cache",
-      },
-    });
+/* A SECOND alwaysFreshStrategy() was declared here — the same logic as the
+   one above, differing only in its log strings. ESLint found it the first
+   time this file was linted.
 
-    if (response.ok) {
-      console.log("Fresh JSON data fetched successfully:", request.url);
-      return response;
-    }
-
-    // If fresh fetch fails, try cache as last resort
-    console.log("Fresh fetch failed, trying cache:", request.url);
-    const cachedResponse = await caches.match(request);
-    return cachedResponse || response;
-  } catch (error) {
-    console.log("Network error for JSON, trying cache:", request.url);
-    const cachedResponse = await caches.match(request);
-    if (cachedResponse) {
-      return cachedResponse;
-    }
-    throw error;
-  }
-}
+   In a classic worker the later declaration silently wins, so the FIRST one
+   was dead code and any edit made to it did nothing at all. Removed rather
+   than merged: there was nothing in it the survivor lacks. */
 
 // Network-first with cache fallback for themed HTML
 async function networkFirstWithCacheFallback(request) {
   try {
-    console.log("Fetching themed HTML from network:", request.url);
+    console.log('Fetching themed HTML from network:', request.url);
     const networkResponse = await fetch(request);
 
     if (networkResponse.ok) {
@@ -249,16 +234,13 @@ async function networkFirstWithCacheFallback(request) {
     // If network fails, try cache
     const cachedResponse = await caches.match(request);
     if (cachedResponse) {
-      console.log("Network failed, serving cached themed HTML:", request.url);
+      console.log('Network failed, serving cached themed HTML:', request.url);
       return cachedResponse;
     }
 
     return networkResponse; // Return the error response
   } catch (error) {
-    console.log(
-      "Network request failed for themed HTML, trying cache:",
-      request.url
-    );
+    console.log('Network request failed for themed HTML, trying cache:', request.url);
 
     // Try to get from cache
     const cachedResponse = await caches.match(request);
@@ -267,8 +249,8 @@ async function networkFirstWithCacheFallback(request) {
     }
 
     // If no cache and it's an HTML request, return offline page
-    if (request.headers.get("Accept")?.includes("text/html")) {
-      return caches.match("/offline.html");
+    if (request.headers.get('Accept')?.includes('text/html')) {
+      return caches.match('/offline.html');
     }
 
     throw error;
@@ -291,10 +273,10 @@ async function cacheFirstStrategy(request) {
     }
     return networkResponse;
   } catch (error) {
-    console.error("Fetch failed:", error);
+    console.error('Fetch failed:', error);
     // If it's an HTML request, return a simple offline page
-    if (request.headers.get("Accept")?.includes("text/html")) {
-      return caches.match("/offline.html");
+    if (request.headers.get('Accept')?.includes('text/html')) {
+      return caches.match('/offline.html');
     }
     // For other resources, just return the error
     throw error;
@@ -309,18 +291,18 @@ async function cacheFirstStrategy(request) {
 // app had to race a cache-clearing handshake against a navigation to avoid it.
 // The routes now return identical markup, themed from config.json at runtime, so
 // there is no stale page to clear and no race to lose.
-self.addEventListener("message", async (event) => {
-  if (event.data && event.data.type === "CLEAR_DATA_CACHE") {
-    console.log("Service Worker: Clearing data cache");
+self.addEventListener('message', async (event) => {
+  if (event.data && event.data.type === 'CLEAR_DATA_CACHE') {
+    console.log('Service Worker: Clearing data cache');
 
     // Clear all data files from cache
     const cache = await caches.open(DYNAMIC_CACHE);
     const keys = await cache.keys();
 
     for (const request of keys) {
-      if (request.url.includes("/data/")) {
+      if (request.url.includes('/data/')) {
         await cache.delete(request);
-        console.log("Deleted from cache:", request.url);
+        console.log('Deleted from cache:', request.url);
       }
     }
 
@@ -328,14 +310,14 @@ self.addEventListener("message", async (event) => {
     event.ports[0]?.postMessage({ success: true });
   }
 
-  if (event.data && event.data.type === "CLEAR_ALL_CACHE") {
-    console.log("Service Worker: Clearing all caches");
+  if (event.data && event.data.type === 'CLEAR_ALL_CACHE') {
+    console.log('Service Worker: Clearing all caches');
 
     const cacheNames = await caches.keys();
     for (const cacheName of cacheNames) {
-      if (cacheName.startsWith("glimpse-media-")) {
+      if (cacheName.startsWith('glimpse-media-')) {
         await caches.delete(cacheName);
-        console.log("Deleted cache:", cacheName);
+        console.log('Deleted cache:', cacheName);
       }
     }
 
@@ -344,85 +326,15 @@ self.addEventListener("message", async (event) => {
   }
 });
 
-// Simple offline fallback page
-const OFFLINE_HTML = `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Offline - Glimpse Media Viewer</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
-            background-color: #1a1a1a;
-            color: #fff;
-            text-align: center;
-            padding: 40px 20px;
-            margin: 0;
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-        }
-        .container {
-            max-width: 500px;
-        }
-        h1 {
-            color: #e5a00d;
-            margin-bottom: 20px;
-        }
-        p {
-            font-size: 18px;
-            line-height: 1.6;
-            margin-bottom: 30px;
-        }
-        .icon {
-            font-size: 64px;
-            margin-bottom: 30px;
-        }
-        button {
-            background-color: #e5a00d;
-            color: #000;
-            border: none;
-            padding: 12px 20px;
-            border-radius: 24px;
-            font-weight: bold;
-            cursor: pointer;
-            font-size: 16px;
-            transition: background-color 0.3s;
-        }
-        button:hover {
-            background-color: #f1b020;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="icon">📶</div>
-        <h1>You're Offline</h1>
-        <p>It looks like you're not connected to the internet. Glimpse Media Viewer needs a connection to show your media content.</p>
-        <button onclick="window.location.reload()">Try Again</button>
-    </div>
-</body>
-</html>
-`;
+/* A hardcoded copy of the offline page used to live here — the whole document,
+   inlined as a template literal, plus a second `install` listener that cached it
+   as a fallback if fetching /offline.html failed.
 
-// Create offline page on install
-self.addEventListener("install", (event) => {
-  const offlineRequest = new Request("/offline.html");
-  event.waitUntil(
-    fetch(offlineRequest)
-      .catch(() => {
-        return new Response(OFFLINE_HTML, {
-          headers: { "Content-Type": "text/html" },
-        });
-      })
-      .then((response) => {
-        return caches.open(CACHE_NAME).then((cache) => {
-          return cache.put(offlineRequest, response);
-        });
-      })
-  );
-});
+   It was a duplicate that had already gone stale. web/offline.html is themed
+   from the design tokens and follows the active server; this copy had Plex
+   orange (#e5a00d) hardcoded, so on the fallback path a Jellyfin or Emby install
+   was shown the wrong brand — and the two files had to be edited together for
+   that not to happen, which nothing enforced and nobody would notice.
+
+   The page is now simply cached like any other static asset (see STATIC_ASSETS),
+   so there is one offline page and it is the one in the repo. */

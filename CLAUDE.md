@@ -155,11 +155,22 @@ it.
 - Artwork is re-downloaded only when its MD5 changes. The checksum store is
   per-server and lives on the mounted volume, so a first run after an upgrade
   must not invalidate it — that would re-download an entire library.
-- **An overlay is a tray**: a bottom sheet on phones, a centered dialog on
-  desktop. It declares `role="dialog"` and `tabindex="-1"`, and **nothing else
-  makes it focus-managed** — the manager finds its subjects by that attribute, so
-  an overlay added without the role opens and leaves a keyboard user on the page
-  behind the backdrop with no way in.
+- **There is one overlay system and every overlay uses it.** `.sheet` docks to
+  the bottom edge, `.modal` centres, and `.modal--tray-on-touch` is a dialog that
+  becomes a tray on a phone. Alpine owns *when* an overlay shows (`x-show`,
+  `x-transition`); `web/assets/overlays.css` owns how it looks;
+  `web/assets/overlays.js` owns the drag gesture, the scroll lock and focus.
+  Never hand-roll a seventh — six bespoke overlays is what this replaced.
+  - **The gesture, the scroll lock and the focus manager all find their subjects
+    in the DOM, never from a registry.** Deliberate: a registry has to be updated
+    when an overlay is added, and forgetting is silent — the overlay opens, looks
+    perfect, and simply cannot be swiped, does not lock the page, and strands a
+    keyboard user. Keying on the DOM makes correct markup the only requirement.
+- **An overlay panel declares `role="dialog"`, `aria-modal="true"` and
+  `tabindex="-1"`, and nothing else makes it focus-managed.** One added without
+  them opens and leaves a keyboard user on the page behind the backdrop with no
+  way in. `tests/test_overlay_markup.py` asserts every panel in the markup
+  carries all three; it cannot catch one created at runtime.
   - **A control that closes its own tray and opens another must move focus to
     something still on screen before the first one hides.** Alpine hides on the
     flush *after* the handler, and hiding a focused element hands its focus to
@@ -167,7 +178,32 @@ it.
     return focus to, and an origin rooted at the body is the one case it declines
     to restore. The overlay opens correctly and dismissing it drops the keyboard
     user at the top of the page. Nothing errors, and the pointer path looks
-    perfect. Call the opening control's `.focus()` first.
+    perfect. Call the opening control's `.focus()` first. Both places that do
+    this today — the Actions tray's genre button, the detail overlay's trailer
+    button — say so in a comment.
+  - **The drag region and the scrolling region must stay separate elements.**
+    `.sheet__grip` and `.sheet__head` carry `touch-action: none`, which the
+    browser honours only if they are not themselves the scroller. Nesting a head
+    inside `.sheet__body` hands the gesture back to the browser as a scroll —
+    silently, with no error and no visual difference on a desktop.
+  - **A closing overlay is not an open one.** Both the scroll lock and the focus
+    manager skip anything carrying `.overlay-closing`. Waiting for `display:none`
+    instead pins the page for a beat after every dismissal, so the first flick is
+    swallowed, and holds focus inside an overlay the user already closed.
+  - **The Actions tray is teleported to `<body>` on purpose.** `backdrop-filter`
+    makes an element a containing block for its fixed-position descendants, so
+    the moment the header becomes translucent a tray nested inside it renders
+    squashed into the height of that bar. It looks correct on a desktop viewport
+    either way, which is what makes it easy to "simplify" back into a bug.
+- **Alpine is vendored at `web/assets/alpine.min.js`, never loaded from a CDN.**
+  A CDN script is a network dependency that fails exactly when the network is
+  what failed — the one moment an offline-capable PWA has to work. Cached by the
+  service worker for the same reason, and excluded from ESLint and Prettier
+  because it is third-party.
+- **The offline page exists once, in `web/offline.html`.** `sw.js` used to carry
+  a second copy inlined as a template literal, with the Plex palette hardcoded;
+  it had already gone stale against the themed original. Cache the file, never
+  inline it.
 - **A control is switched off with `aria-disabled`, never the `disabled`
   attribute, and every such binding needs a guard at the action.** The attribute
   drops a control out of the tab order, so a keyboard user is not told it is

@@ -1,0 +1,102 @@
+/* ==========================================================================
+   Design tokens.
+
+   Everything the overlay system draws with is declared here once. An overlay
+   that restates a colour, radius, or duration is a value that will drift the
+   first time one of them changes.
+
+   The per-server palettes stay where they are, in index.html: data-server is set
+   before first paint by the boot script, and splitting the palette away from the
+   rule that reads it would put two files between a server and its colour.
+   ========================================================================== */
+
+:root {
+    /* --- Surfaces -----------------------------------------------------------
+       Three tiers, and the distinction is what an element sits ON, not how
+       important it is. --bg is the page. --surface is anything raised off it:
+       a card, a dialog, a tray. --surface-2 is raised again, for a control
+       sitting on a surface — a tray button against the tray it is in, which
+       would otherwise be the same colour as its own background. */
+    --bg: #1a1a1a;
+    --surface: #2a2a2a;
+    --surface-2: #333;
+    --border: #3a3f47;
+    --border-strong: #474c55;
+
+    /* --- Text --- */
+    --text: #fff;
+    --muted: #aaa;
+
+    /* --- Backdrop -----------------------------------------------------------
+       Dimmed AND blurred, not merely dimmed. Dimming alone leaves the library
+       legible behind an overlay and it goes on competing for attention; the
+       blur pushes it back to texture while still showing the user where they
+       were. */
+    --backdrop-tint: rgba(0, 0, 0, 0.55);
+    --backdrop-blur: blur(6px);
+
+    /* --- Radii --- */
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --radius-xl: 20px;
+    --radius-pill: 999px;
+
+    /* --- Elevation --- */
+    --elev-2: 0 2px 4px rgba(0, 0, 0, 0.2);
+    --elev-4: 0 8px 24px rgba(0, 0, 0, 0.4);
+
+    /* --- Motion -------------------------------------------------------------
+       Exits are shorter than entrances. Leaving should feel quicker than
+       arriving — an overlay the user has dismissed is already gone as far as
+       they are concerned, and making them watch it leave is friction.
+
+       --dur-slow is for a tray, which travels the height of its own panel
+       rather than the 4% a dialog scales; at --dur-base that distance reads as
+       a snap rather than a slide. */
+    --dur-base: 200ms;
+    --dur-slow: 280ms;
+    --dur-exit: 150ms;
+    --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+    --ease-entrance: cubic-bezier(0, 0, 0.2, 1);
+    --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+
+    /* --- Layering -----------------------------------------------------------
+       One ordered scale, not a set of independently chosen numbers.
+
+       A dialog must outrank a tray because a dialog can be raised from inside
+       one — the trailer opens from the detail tray — and a dialog rendered
+       behind the tray that raised it cannot be used. Page chrome takes the
+       lowest tier because it only has to cover the grid, and every overlay must
+       cover it. */
+    --z-chrome: 30;
+    --z-sheet: 50;
+    --z-modal: 55;
+}
+
+/* Alpine has not initialised yet. Without this every overlay renders expanded
+   for a frame before x-show hides it — all six at once, stacked, on first
+   paint. */
+[x-cloak] {
+    display: none !important;
+}
+
+/* Reduced motion, stated once and app-wide.
+
+   An overlay moves the largest area of the screen of anything here, so this is
+   the most consequential place to miss it. Not `animation: none`: the
+   transitions still have to RUN, because Alpine waits for them to finish before
+   it removes the element. Zero duration ends them on the next frame, which is
+   what "instant" means without stranding an overlay that never fires its
+   transitionend. */
+@media (prefers-reduced-motion: reduce) {
+
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
