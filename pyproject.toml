@@ -48,6 +48,17 @@ ignore = [
     "T201",
 ]
 
+[tool.ruff.format]
+# Match the frontend. Prettier is configured with singleQuote, and a repo that
+# disagrees with itself about quotes across two languages is noise in every diff.
+quote-style = "single"
+
+[tool.ruff.lint.isort]
+# The container invokes these by path, so they are not an installed package and
+# ruff cannot infer they are ours. Declared, or the test imports get grouped
+# with third-party ones.
+known-first-party = ["glimpse_config"]
+
 [tool.ruff.lint.per-file-ignores]
 # Asserting on a private helper is the point of a unit test.
 "tests/*" = ["S101"]

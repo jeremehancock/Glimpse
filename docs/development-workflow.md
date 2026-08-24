@@ -307,7 +307,7 @@ Glimpse/
 ├─ Dockerfile
 ├─ Makefile               # the quality gates
 ├─ config/                # entrypoint.sh, nginx.conf, supervisord.conf
-├─ scripts/               # the Plex / Jellyfin+Emby fetchers
+├─ scripts/               # glimpse_config.py + the Plex / Jellyfin+Emby fetchers
 ├─ web/                   # the static frontend served by nginx
 ├─ tests/                 # pytest
 ├─ data/                  # the snapshot (mounted volume; git-ignored)

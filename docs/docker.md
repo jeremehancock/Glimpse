@@ -55,35 +55,76 @@ questions here, and only the second one is interesting.
 
 ## The entrypoint contract
 
-`config/entrypoint.sh` does exactly two things:
+`config/entrypoint.sh` is about 130 lines and does four things: migrate an old
+data layout, generate configuration, run an initial fetch, and start supervisord.
 
-1. **Validate and normalise the environment.** Detect which servers have
-   credentials, resolve `PRIMARY_SERVER` (correcting it if it names a server with
-   no credentials), apply defaults for `APP_TITLE`, `CRON_SCHEDULE`, and
-   `SORT_BY_DATE_ADDED`, install the crontab, and create the per-server data
-   directories.
-2. **Write `/app/web/config.json`.**
+The generation step is delegated to `scripts/glimpse_config.py`, which resolves
+the environment and writes three files:
+
+| File | What it is |
+| --- | --- |
+| `/app/web/config.json` | The container-to-frontend contract |
+| `/app/web/manifest.json` | The PWA manifest, themed for the primary server |
+| `/etc/cron.d/media-cron` | One scheduled fetch per configured server |
+
+All three come from one resolution so that "which servers are configured" has a
+single implementation — the old script answered it in three places and they
+drifted.
+
+### `config.json`
 
 ```json
 {
   "appTitle": "Glimpse",
   "primaryServer": "plex",
-  "servers": ["plex", "jellyfin"],
+  "servers": [
+    { "id": "plex", "name": "Plex", "dataPath": "data/plex" },
+    { "id": "jellyfin", "name": "Jellyfin", "dataPath": "data/jellyfin" }
+  ],
   "sortByDateAdded": false
 }
 ```
 
-That file is the whole interface between the container and the frontend. The app
-fetches it once at boot, sets `data-server="<primaryServer>"` on `<html>`, and
-CSS custom properties do the per-server theming from there.
+`servers` lists only servers with **both** a URL and a token, always in the order
+`plex`, `jellyfin`, `emby` — fixed, so a switcher's entries do not reshuffle when
+a user adds a server. Credentials never appear; a test asserts that.
 
-**The entrypoint must never edit a file under `/app/web` other than
-`config.json`.** The previous implementation rewrote `index.html` with `sed` on
-every boot — injecting per-server themes and a server dropdown, then running
-repair functions to clean up the corruption it had caused. That approach produced
-most of this project's historical bugs. If something appears to require it, that
-is a spec change to `application-shell`, not a wiring decision. See
-[CLAUDE.md](../CLAUDE.md).
+The app fetches this once at boot, sets `data-server="<active>"` on `<html>`, and
+CSS custom properties do the theming from there. A missing or malformed file is
+**reported to the user**, never defaulted around.
+
+### Generate, never mutate
+
+**The entrypoint must never edit an authored file.** It writes whole files it
+owns, from templates it owns; it does not patch anything in place.
+
+The previous implementation rewrote `index.html` with `sed` on every boot —
+injecting per-server themes and a server dropdown, copying the page into
+`/plex/`, `/jellyfin/` and `/emby/` — then ran
+`cleanup_duplicate_server_content()` and `fix_corrupted_files()` to repair the
+damage it had done to its own output. `sed` fails silently when a pattern does
+not match, and is not idempotent over its own output, so correctness depended on
+how many times the container had started.
+
+`make docker-smoke` asserts the web root is clean after boot, and that every
+route serves byte-identical markup. If something appears to require editing an
+authored file, that is a spec change to `application-shell`, not a wiring
+decision. See [CLAUDE.md](../CLAUDE.md).
+
+### The server routes
+
+`/`, `/plex/`, `/jellyfin/` and `/emby/` all serve the **same** `index.html`.
+nginx aliases them; the app reads the active server from the first path segment
+and falls back to `primaryServer` at the root. A path naming an unconfigured
+server redirects to `/`.
+
+Two things in `config/nginx.conf` are load-bearing:
+
+- **`location ^~ /data/`** — the `^~` matters. Without it nginx checks the regex
+  location for image extensions *first*, so `/data/plex/posters/1.jpg` would
+  resolve against the document root instead of the alias.
+- **`location = /config.json`** with `no-store` — a restart with new settings has
+  to take effect on the next load, not whenever a cached copy expires.
 
 ## The data volume
 

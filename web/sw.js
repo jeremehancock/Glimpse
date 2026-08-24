@@ -1,10 +1,20 @@
 // Service Worker for Glimpse Media Viewer
 
-const CACHE_NAME = "glimpse-media-viewer-v7.3";
-const DYNAMIC_CACHE = "glimpse-media-dynamic-v7.3";
+// Bumped from v7.3 by `replace-boot-time-html-rewriting`. The bump is
+// load-bearing, not cosmetic: before this change each server route was a
+// physically different index.html, so a client upgrading from v7.3 may hold a
+// cached page with a theme and data paths baked into its markup. Those entries
+// have to be discarded, and changing the cache name is what discards them.
+const CACHE_NAME = "glimpse-media-viewer-v8.0";
+const DYNAMIC_CACHE = "glimpse-media-dynamic-v8.0";
 
-// Assets to cache on install (excluding HTML files that might have themes)
-const STATIC_ASSETS = ["/manifest.json", "/test.html"];
+// Assets to cache on install.
+//
+// manifest.json is generated per-primary-server at container start, so it is
+// cached under a version that changes when the scheme does — not held forever.
+// (/test.html used to be here; it was a debug page the old entrypoint wrote
+// into the web root, and it no longer exists.)
+const STATIC_ASSETS = ["/manifest.json"];
 
 // Install event - cache static assets
 self.addEventListener("install", (event) => {
@@ -52,22 +62,31 @@ self.addEventListener("activate", (event) => {
   );
 });
 
-// Check if a request is for a themed HTML file
-function isThemedHtmlRequest(request) {
+// Check if a request is for the app shell.
+//
+// These used to be four physically different files, each with a theme and its
+// data paths baked in by sed at container start — hence the old name,
+// isThemedHtmlRequest. They are now one file: nginx serves the same index.html
+// for every route, and the theme comes from config.json at runtime. The routes
+// still need listing because they are distinct URLs, but the RESPONSE is
+// identical for all of them.
+function isAppShellRequest(request) {
   const url = new URL(request.url);
   const pathname = url.pathname;
 
-  // Main index, plex route, jellyfin route, or emby route - these have themes
   return (
     pathname === "/" ||
     pathname === "/index.html" ||
-    pathname === "/plex/" ||
-    pathname === "/plex/index.html" ||
-    pathname === "/jellyfin/" ||
-    pathname === "/jellyfin/index.html" ||
-    pathname === "/emby/" ||
-    pathname === "/emby/index.html"
+    /^\/(plex|jellyfin|emby)\/(index\.html)?$/.test(pathname)
   );
+}
+
+// The generated configuration. Never cached, and this check must come BEFORE
+// the static-asset fallback: config.json does not live under /data/, so without
+// it the request falls through to the cache-first strategy and a container
+// restart with new settings would never be seen by an installed client.
+function isConfigRequest(request) {
+  return new URL(request.url).pathname === "/config.json";
 }
 
 // Check if request is for JSON data files (these need fresh data)
@@ -92,8 +111,16 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Themed HTML files - always fetch from network to get latest theme
-  if (isThemedHtmlRequest(event.request)) {
+  // The generated configuration - never cached. Checked first, before anything
+  // that could fall through to a caching strategy.
+  if (isConfigRequest(event.request)) {
+    event.respondWith(alwaysFreshStrategy(event.request));
+    return;
+  }
+
+  // The app shell - network first so an upgrade is picked up, cache as the
+  // offline fallback.
+  if (isAppShellRequest(event.request)) {
     event.respondWith(networkFirstWithCacheFallback(event.request));
     return;
   }
@@ -274,33 +301,15 @@ async function cacheFirstStrategy(request) {
   }
 }
 
-// Clear specific cache types when receiving a message from the app
+// Clear specific cache types when receiving a message from the app.
+//
+// CLEAR_THEMED_CACHE was removed by `replace-boot-time-html-rewriting`. It
+// existed because each server route was a physically different index.html, so
+// switching servers could serve the previous server's page from cache — and the
+// app had to race a cache-clearing handshake against a navigation to avoid it.
+// The routes now return identical markup, themed from config.json at runtime, so
+// there is no stale page to clear and no race to lose.
 self.addEventListener("message", async (event) => {
-  if (event.data && event.data.type === "CLEAR_THEMED_CACHE") {
-    console.log("Service Worker: Clearing themed HTML cache");
-
-    // Clear specific themed URLs from cache
-    const themedUrls = [
-      "/",
-      "/index.html",
-      "/plex/",
-      "/plex/index.html",
-      "/jellyfin/",
-      "/jellyfin/index.html",
-      "/emby/",
-      "/emby/index.html",
-    ];
-
-    const cache = await caches.open(DYNAMIC_CACHE);
-    for (const url of themedUrls) {
-      await cache.delete(url);
-      await cache.delete(new URL(url, self.location.origin).href);
-    }
-
-    // Send confirmation back to the app
-    event.ports[0]?.postMessage({ success: true });
-  }
-
   if (event.data && event.data.type === "CLEAR_DATA_CACHE") {
     console.log("Service Worker: Clearing data cache");
 

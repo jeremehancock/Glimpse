@@ -7,7 +7,7 @@
     <title>Glimpse</title>
 
     <!-- PWA Meta Tags -->
-    <meta name="theme-color" content="#e5a00d">
+    <meta name="theme-color" content="#131313">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Glimpse Media">
     <meta name="application-name" content="Glimpse Media Viewer">
@@ -16,20 +16,89 @@
     <!-- PWA Manifest -->
     <link rel="manifest" href="/manifest.json">
 
-    <!-- PWA Icons -->
+    <!-- PWA Icons. The href values here are the Plex set; the boot script below
+         repoints them when another server is active. -->
     <link rel="icon" type="image/png" sizes="192x192" href="/images/android-chrome-192x192.png">
     <link rel="icon" type="image/png" sizes="512x512" href="/images/android-chrome-592x592.png">
 
-    <link rel="apple-touch-icon" sizes="180x180" href="images/apple-touch-icon.png">
-    <link rel="icon" type="image/png" sizes="32x32" href="images/favicon-32x32.png">
-    <link rel="icon" type="image/png" sizes="16x16" href="images/favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png">
+
+    <!--
+      ==================================================================
+      CONFIG ADAPTER — temporary, removed by the frontend rewrite.
+      ==================================================================
+
+      Introduced by the OpenSpec change `replace-boot-time-html-rewriting`,
+      which deleted ~1,700 lines of shell that used to bake all of this into
+      the markup with `sed` at container start.
+
+      Everything between this comment and the one marked END OF CONFIG ADAPTER
+      exists to read /config.json and apply what `sed` used to substitute: the
+      theme, the title, the data paths, the default sort, the icons, and the
+      server switcher. The next change replaces this file wholesale and this
+      block goes with it. Do not build on it.
+
+      WHY A SYNCHRONOUS REQUEST. The theme has to be on <html> before first
+      paint — applying it later paints the Plex palette and then swaps it, a
+      visible flash of the wrong brand on every load for two thirds of users.
+      Nothing asynchronous can meet that, so this is a blocking read of a
+      sub-kilobyte, same-origin, no-cache file served by the nginx in the same
+      container. Browsers log a deprecation notice for it; that is the known
+      and accepted cost. It falls back gracefully if the read fails, and the
+      application-level error is raised later by loadConfig().
+    -->
+    <script>
+        window.GLIMPSE = (function () {
+            var SERVER_IDS = ['plex', 'jellyfin', 'emby'];
+            var config = null;
+
+            try {
+                var request = new XMLHttpRequest();
+                // Synchronous on purpose. See the comment above.
+                request.open('GET', '/config.json', false);
+                request.send(null);
+                if (request.status >= 200 && request.status < 300) {
+                    config = JSON.parse(request.responseText);
+                }
+            } catch (error) {
+                // Swallowed here only so the page still renders enough chrome to
+                // show the error. loadConfig() reports it properly.
+                config = null;
+            }
+
+            // First path segment, when it names a server.
+            var segment = (window.location.pathname.split('/')[1] || '').toLowerCase();
+            var fromPath = SERVER_IDS.indexOf(segment) !== -1 ? segment : null;
+
+            var configured = (config && config.servers) || [];
+            var isConfigured = function (id) {
+                return configured.some(function (server) { return server.id === id; });
+            };
+
+            // A path naming a server that is not configured is a bookmark that
+            // outlived a configuration change. Send it home rather than showing
+            // an empty library.
+            if (config && fromPath && !isConfigured(fromPath)) {
+                window.location.replace('/');
+            }
+
+            var active = (fromPath && isConfigured(fromPath))
+                ? fromPath
+                : (config && config.primaryServer) || 'plex';
+
+            // Before first paint: this script is parser-blocking and sits above
+            // every stylesheet rule that reads the token.
+            document.documentElement.setAttribute('data-server', active);
+
+            return { config: config, activeServer: active, serverIds: SERVER_IDS };
+        })();
+    </script>
 
     <style>
         :root {
             --poster-width: 200px;
-            --primary-color: #e5a00d;
-            --primary-hover: #f1b020;
-            --primary-light: rgba(229, 160, 13, 0.1);
             --bg-color: #1a1a1a;
             --secondary-bg: #2a2a2a;
             --header-bg: #242424;
@@ -42,6 +111,72 @@
             --transition-speed: 0.3s;
             --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.1);
             --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        /* Per-server palettes.
+         *
+         * These replace the per-server <style> blocks the entrypoint used to
+         * append to this file, every rule of which carried !important — needed
+         * only because an injected block had to out-rank the stylesheet it was
+         * appended to. That problem disappears once the theme is a variable the
+         * stylesheet already reads, which is why there is not an !important in
+         * sight below.
+         *
+         * data-server is set by the boot script above, before first paint.
+         * The Plex block is also the fallback: if config.json cannot be read,
+         * the attribute is still "plex" and the app is themed rather than
+         * unstyled while it reports the error.
+         */
+        :root[data-server='plex'] {
+            --primary-color: #e5a00d;
+            --primary-hover: #f1b020;
+            --primary-light: rgba(229, 160, 13, 0.1);
+            --accent-gradient: linear-gradient(135deg, #e5a00d, #f1b020);
+        }
+
+        :root[data-server='jellyfin'] {
+            --primary-color: #00a4dc;
+            --primary-hover: #0288c2;
+            --primary-light: rgba(0, 164, 220, 0.1);
+            --accent-gradient: linear-gradient(135deg, #00a4dc, #7b68ee);
+        }
+
+        :root[data-server='emby'] {
+            --primary-color: #52c41a;
+            --primary-hover: #389e0d;
+            --primary-light: rgba(82, 196, 26, 0.1);
+            --accent-gradient: linear-gradient(135deg, #52c41a, #389e0d);
+        }
+
+        /* The configuration error. Deliberately plain and dependent on nothing:
+         * it has to render when the thing that failed is the configuration.
+         */
+        .config-error {
+            max-width: 40rem;
+            margin: 15vh auto;
+            padding: 2rem;
+            background: #2a2a2a;
+            border-left: 4px solid #e5484d;
+            border-radius: 6px;
+            color: #fff;
+            font-family: system-ui, -apple-system, sans-serif;
+            line-height: 1.6;
+        }
+
+        .config-error h2 {
+            margin-bottom: 0.75rem;
+            font-size: 1.25rem;
+        }
+
+        .config-error code {
+            background: #1a1a1a;
+            padding: 0.15em 0.4em;
+            border-radius: 3px;
+            font-size: 0.9em;
+        }
+
+        .config-error p+p {
+            margin-top: 0.75rem;
         }
 
         * {
@@ -1610,12 +1745,214 @@
     <button class="scroll-to-top" aria-label="Scroll to top"></button>
 
     <script>
+        // ============ CONFIG ADAPTER (continued) ============
+        // The single configuration store. Read once, at boot, from the copy the
+        // parser-blocking script in <head> already fetched — never re-fetched,
+        // because configuration cannot change without a container restart and a
+        // second read is only an opportunity for two parts of the app to
+        // disagree about what it says.
+        const CONFIG = window.GLIMPSE.config;
+        const ACTIVE_SERVER = window.GLIMPSE.activeServer;
+
+        /**
+         * Report a configuration failure and stop.
+         *
+         * Deliberately NOT a fallback to defaults. A silent fallback here
+         * reproduces exactly the failure this change removed: a misconfigured
+         * install that looks like a working one, quietly showing the wrong
+         * library — or an empty one indistinguishable from a server with no
+         * media.
+         */
+        function reportConfigError(detail) {
+            document.body.innerHTML =
+                '<div class="config-error" role="alert">' +
+                '<h2>Glimpse is not configured</h2>' +
+                '<p>The application could not read <code>/config.json</code>, ' +
+                'which the container generates at startup.</p>' +
+                '<p>This usually means the entrypoint did not finish. Check the ' +
+                'container logs with <code>docker logs glimpse-media-viewer</code>.</p>' +
+                '<p><small>' + detail + '</small></p>' +
+                '</div>';
+        }
+
+        /** The active server's entry from config.json. */
+        function activeServerConfig() {
+            return CONFIG.servers.find(server => server.id === ACTIVE_SERVER);
+        }
+
+        /**
+         * Resolve a snapshot path for the active server.
+         *
+         * Absolute, always. This is what lets one index.html serve `/` and
+         * `/jellyfin/` alike: a relative `data/...` resolves against the
+         * document, so it would mean two different URLs on those two routes.
+         * Rewriting every path per route is precisely what create_server_index()
+         * existed to do, and why there were four copies of this file.
+         */
+        function dataUrl(...segments) {
+            return '/' + activeServerConfig().dataPath + '/' + segments.join('/');
+        }
+
         let moviesData = [];
         let tvShowsData = [];
+        // Initial value; overwritten from config.json by applyConfig() below,
+        // which is what the entrypoint used to do by substituting this line.
         let currentSortMethod = 'alpha'; // Default sorting method: 'alpha' or 'date'
         let currentGenre = 'all'; // Default genre filter: 'all' or specific genre
         let allGenres = { movies: {}, tvshows: {} }; // Store all unique genres and their counts
         let isMobileView = window.innerWidth < 992; // Track if we're in mobile view
+
+        /**
+         * Apply everything the entrypoint used to bake into this file with sed:
+         * the title, the heading, the default sort, the icons, and the switcher.
+         */
+        function applyConfig() {
+            const server = activeServerConfig();
+
+            // Title carries the server name; the heading does not. Set from the
+            // config rather than edited in place, so it never accumulates a
+            // second server name the way repeated sed runs could.
+            document.title = CONFIG.appTitle + ' - ' + server.name;
+
+            const heading = document.querySelector('.logo-section h1');
+            if (heading) {
+                const logo = heading.querySelector('.logo-icon');
+                heading.textContent = '';
+                if (logo) heading.appendChild(logo);
+                heading.appendChild(document.createTextNode(CONFIG.appTitle));
+            }
+
+            if (CONFIG.sortByDateAdded === true) {
+                currentSortMethod = 'date';
+            }
+
+            applyServerIcons(server.id);
+            renderServerSwitcher();
+        }
+
+        /**
+         * Point the icons and logo at the active server's set.
+         *
+         * The one part of theming a custom property cannot express: a
+         * <link rel="icon"> needs a real address. This is DOM work on a parsed
+         * document — idempotent, and leaving nothing on disk — not sed over a
+         * file.
+         */
+        function applyServerIcons(serverId) {
+            const base = serverId === 'plex' ? '/images' : '/images/' + serverId;
+
+            const icons = {
+                'link[rel="apple-touch-icon"]': '/apple-touch-icon.png',
+                'link[rel="icon"][sizes="32x32"]': '/favicon-32x32.png',
+                'link[rel="icon"][sizes="16x16"]': '/favicon-16x16.png',
+                'link[rel="icon"][sizes="192x192"]': '/android-chrome-192x192.png',
+                'link[rel="icon"][sizes="512x512"]': '/android-chrome-592x592.png',
+            };
+
+            for (const [selector, file] of Object.entries(icons)) {
+                const link = document.head.querySelector(selector);
+                if (link) link.href = base + file;
+            }
+
+            const logo = document.querySelector('.logo-icon img');
+            if (logo) logo.src = base + '/logo.png';
+
+            // Keep the document's theme-color in step with the generated
+            // manifest: they drive the same surfaces, so a disagreement shows
+            // as a colour change when the app is installed.
+            const themeColors = { plex: '#131313', jellyfin: '#101010', emby: '#0f1419' };
+            const meta = document.head.querySelector('meta[name="theme-color"]');
+            if (meta) meta.content = themeColors[serverId];
+        }
+
+        /** Servers other than the active one — the switcher's destinations. */
+        function otherServers() {
+            return CONFIG.servers.filter(server => server.id !== ACTIVE_SERVER);
+        }
+
+        /** Where a server is browsed. The primary server lives at the root. */
+        function serverPath(serverId) {
+            return serverId === CONFIG.primaryServer ? '/' : '/' + serverId + '/';
+        }
+
+        /**
+         * Show a switcher matching how many servers are configured: nothing for
+         * one, a toggle for two, a menu for three.
+         *
+         * The markup carries SERVER_NAME placeholders that the entrypoint used
+         * to substitute — and `toggleServer()` used to hardcode a Plex/Jellyfin
+         * pair, so a Plex+Emby install could not switch back at all. Both are
+         * fixed by driving this from config.json.
+         */
+        function renderServerSwitcher() {
+            const others = otherServers();
+
+            document.querySelectorAll('.server-toggle-button').forEach(button => {
+                if (others.length === 0) {
+                    // One server: there is nowhere to switch to. Remove the
+                    // control rather than disabling it — a control that can
+                    // never do anything is not unavailable, it is absent.
+                    const wrapper = button.closest('.server-toggle');
+                    (wrapper || button).remove();
+                    return;
+                }
+
+                const target = others[0];
+                const label = button.querySelector('.server-text');
+                if (label) {
+                    label.textContent = others.length === 1
+                        ? 'Switch to ' + target.name
+                        : 'Switch server';
+                }
+
+                button.classList.add('configured');
+                const wrapper = button.closest('.server-toggle');
+                if (wrapper) wrapper.classList.add('configured');
+
+                button.onclick = others.length === 1
+                    ? () => switchToServer(target.id)
+                    : () => openServerMenu(button, others);
+            });
+        }
+
+        /** With three servers there is a choice to present, so present one. */
+        function openServerMenu(trigger, others) {
+            document.querySelector('.server-menu')?.remove();
+
+            const menu = document.createElement('div');
+            menu.className = 'genre-menu server-menu';
+            menu.style.display = 'block';
+            others.forEach(server => {
+                const item = document.createElement('div');
+                item.className = 'genre-item';
+                item.textContent = server.name;
+                item.onclick = () => switchToServer(server.id);
+                menu.appendChild(item);
+            });
+
+            (trigger.closest('.server-toggle') || trigger.parentElement).appendChild(menu);
+
+            // Dismiss on the next click anywhere else.
+            setTimeout(() => {
+                document.addEventListener('click', function dismiss(event) {
+                    if (!menu.contains(event.target) && event.target !== trigger) {
+                        menu.remove();
+                        document.removeEventListener('click', dismiss);
+                    }
+                });
+            }, 0);
+        }
+
+        /**
+         * Navigate to another server.
+         *
+         * No service-worker cache-clearing handshake any more: the cache is
+         * keyed by server, so there is nothing to race. See sw.js.
+         */
+        function switchToServer(serverId) {
+            window.location.href = serverPath(serverId);
+        }
+        // ============ END OF CONFIG ADAPTER ============
 
         // Function to check if device is mobile/tablet
         function checkMobileView() {
@@ -2102,11 +2439,11 @@
         async function loadMedia() {
             try {
                 // Load movies
-                const moviesResponse = await fetch('data/movies.json');
+                const moviesResponse = await fetch(dataUrl('movies.json'));
                 moviesData = await moviesResponse.json();
 
                 // Load TV shows
-                const tvShowsResponse = await fetch('data/tvshows.json');
+                const tvShowsResponse = await fetch(dataUrl('tvshows.json'));
                 tvShowsData = await tvShowsResponse.json();
 
                 // Extract genres
@@ -2292,8 +2629,8 @@
                 mediaItem.style.transition = `opacity 0.3s ease ${index * 0.03}s, transform 0.3s ease ${index * 0.03}s`;
 
                 const posterPath = type === 'movies' ?
-                    `data/posters/movies/${item.id}.jpg` :
-                    `data/posters/tvshows/${item.id}.jpg`;
+                    dataUrl('posters', 'movies', `${item.id}.jpg`) :
+                    dataUrl('posters', 'tvshows', `${item.id}.jpg`);
 
                 // Format the added date
                 const addedDate = formatDate(item.addedAt);
@@ -2343,8 +2680,8 @@
         function openModal(item, type) {
             // Set poster image
             const posterPath = type === 'movies' ?
-                `data/posters/movies/${item.id}.jpg` :
-                `data/posters/tvshows/${item.id}.jpg`;
+                dataUrl('posters', 'movies', `${item.id}.jpg`) :
+                dataUrl('posters', 'tvshows', `${item.id}.jpg`);
 
             const posterContainer = document.querySelector('.modal-poster');
             posterContainer.innerHTML = ''; // Clear existing content
@@ -2371,8 +2708,8 @@
 
             // Set backdrop image
             const backdropPath = type === 'movies' ?
-                `data/backdrops/movies/${item.id}.jpg` :
-                `data/backdrops/tvshows/${item.id}.jpg`;
+                dataUrl('backdrops', 'movies', `${item.id}.jpg`) :
+                dataUrl('backdrops', 'tvshows', `${item.id}.jpg`);
 
             const backdropElement = document.querySelector('.modal-backdrop');
             backdropElement.innerHTML = ''; // Clear any existing content
@@ -2609,7 +2946,23 @@
             document.body.style.overflow = ''; // Restore scrolling
         }
 
-        // Initialize on page load
+        // Initialize on page load.
+        //
+        // applyConfig() runs FIRST: it sets currentSortMethod from config.json,
+        // and loadMedia() sorts as soon as the data arrives. Reversing these two
+        // lines makes SORT_BY_DATE_ADDED apply only after the next interaction —
+        // a bug that looks like the setting being ignored.
+        if (!CONFIG) {
+            reportConfigError('config.json could not be read or was not valid JSON.');
+            // Abort the rest of this block. There is no top-level `return` in a
+            // classic script, and continuing would run initialisation against a
+            // body that has just been replaced by the error message. Later
+            // script blocks guard on window.GLIMPSE.failed.
+            window.GLIMPSE.failed = true;
+            throw new Error('Glimpse: configuration unavailable; startup aborted.');
+        }
+
+        applyConfig();
         loadMedia();
 
         // Enhanced scroll to top button functionality
@@ -2758,64 +3111,26 @@
             }
         }
 
-        // Server toggle functionality with cache clearing
-        async function toggleServer() {
-            const currentPath = window.location.pathname;
-            let newPath;
-
-            if (currentPath === "/" || currentPath === "/index.html") {
-                newPath = "SERVER_PATH/";
-            } else if (currentPath.startsWith("/plex/")) {
-                newPath = "/jellyfin/";
-            } else if (currentPath.startsWith("/jellyfin/")) {
-                newPath = "/plex/";
-            } else {
-                newPath = "SERVER_PATH/";
+        /**
+         * Kept only because the markup has inline onclick="toggleServer()"
+         * handlers. renderServerSwitcher() rebinds those buttons, so this runs
+         * only for a path that missed rebinding; it delegates rather than
+         * reimplementing the choice.
+         *
+         * Previously this hardcoded a Plex-to-Jellyfin swap and fell through to
+         * a "SERVER_PATH/" placeholder for anything else — which meant a
+         * Plex+Emby install navigated to a literal /SERVER_PATH/ and 404'd.
+         */
+        function toggleServer() {
+            const others = otherServers();
+            if (others.length > 0) {
+                switchToServer(others[0].id);
             }
-
-            // Clear themed cache in service worker before navigating
-            if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
-                try {
-                    // Create a message channel to communicate with the service worker
-                    const messageChannel = new MessageChannel();
-
-                    // Send message to clear themed cache
-                    navigator.serviceWorker.controller.postMessage(
-                        { type: 'CLEAR_THEMED_CACHE' },
-                        [messageChannel.port2]
-                    );
-
-                    // Wait for confirmation (optional, but good practice)
-                    messageChannel.port1.onmessage = (event) => {
-                        console.log('Service Worker cache cleared:', event.data);
-                    };
-                } catch (error) {
-                    console.log('Could not clear service worker cache:', error);
-                }
-            }
-
-            // Navigate to the new path
-            window.location.href = newPath;
         }
-
-        // Check if server toggle should be shown (only if properly configured)
-        document.addEventListener('DOMContentLoaded', function () {
-            const serverToggles = document.querySelectorAll('.server-toggle');
-            const serverButtons = document.querySelectorAll('.server-toggle-button');
-
-            serverButtons.forEach(button => {
-                const serverText = button.querySelector('.server-text');
-                if (serverText && !serverText.textContent.includes('SERVER_NAME')) {
-                    // Server is properly configured, show the toggle
-                    button.classList.add('configured');
-                    button.closest('.server-toggle').classList.add('configured');
-                }
-            });
-        });
-
     </script>
 
     <script>
+        if (window.GLIMPSE.failed) { throw new Error('Glimpse: configuration unavailable.'); }
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('/sw.js')
@@ -3226,6 +3541,7 @@
     </style>
 
     <script>
+        if (window.GLIMPSE.failed) { throw new Error('Glimpse: configuration unavailable.'); }
         // Modify the modal HTML to include the Watch Trailer button
         document.addEventListener('DOMContentLoaded', function () {
             // Add the Watch Trailer button to the modal title section
@@ -3618,6 +3934,7 @@
     </style>
 
     <script>
+        if (window.GLIMPSE.failed) { throw new Error('Glimpse: configuration unavailable.'); }
         document.addEventListener('DOMContentLoaded', function () {
             // Get elements
             const rouletteOverlay = document.querySelector('.roulette-overlay');
@@ -3973,6 +4290,7 @@
     </script>
 
     <script>
+        if (window.GLIMPSE.failed) { throw new Error('Glimpse: configuration unavailable.'); }
 
         // Code to add to ensure date sort is properly applied when set as default
         function applyDefaultSortStyles() {

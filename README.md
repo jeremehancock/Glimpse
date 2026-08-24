@@ -275,12 +275,14 @@ Glimpse/
 ├── openspec/                 # Capability specs and in-flight changes
 │
 ├── scripts/
+│   ├── glimpse_config.py     # Resolves the environment into config.json at startup
 │   ├── plex_data_fetcher.py  # Python script to fetch Plex data
 │   └── jellyfin_data_fetcher.py # Python script to fetch Jellyfin/Emby data
 │
 ├── web/
 │   ├── index.html            # Frontend web interface
-│   ├── manifest.json         # PWA manifest file
+│   ├── config.json           # Generated at startup — not in the repo
+│   ├── manifest.json         # PWA manifest (regenerated at startup per server)
 │   ├── sw.js                 # Service worker for PWA functionality
 │   ├── offline.html          # Offline fallback page
 │   └── images/               # Icons and images
@@ -336,11 +338,12 @@ Glimpse/
 2. **Library Filtering**: Excluded libraries are automatically skipped during data fetching, and existing data files are cleaned to ensure consistency.
 3. **Multi-Server Support**: When multiple servers are configured, data is fetched separately and stored in server-specific directories.
 4. **Image Processing**: Media posters and backdrops are downloaded, with MD5 checksums to avoid re-downloading unchanged files.
-5. **Theming**: The interface automatically adapts its theme based on your primary server (Plex orange/yellow, Jellyfin blue, or Emby green).
-6. **Server Switching**: If multiple servers are configured, users can switch between them with a dropdown menu.
-7. **Web Server**: Nginx serves the static web interface and the downloaded data.
-8. **Scheduled Updates**: Cron runs the data fetchers on the configured schedule to keep content up-to-date.
-9. **Persistence**: All data is stored in volumes mapped to your host, ensuring it persists between container restarts.
+5. **Configuration**: At startup the container resolves your environment into `config.json`, which the interface reads once when it loads. Your web files are never modified.
+6. **Theming**: The interface automatically adapts its theme based on your primary server (Plex orange/yellow, Jellyfin blue, or Emby green).
+7. **Server Switching**: If multiple servers are configured, users can switch between them — a toggle for two servers, a menu for three. Each server also has its own URL: `http://your-server:9090/plex/`, `/jellyfin/`, or `/emby/`, which you can bookmark.
+8. **Web Server**: Nginx serves the static web interface and the downloaded data.
+9. **Scheduled Updates**: Cron runs the data fetchers on the configured schedule to keep content up-to-date.
+10. **Persistence**: All data is stored in volumes mapped to your host, ensuring it persists between container restarts.
 
 ## 🌐 Customization
 
@@ -460,6 +463,18 @@ docker exec glimpse-media-viewer bash -c 'python /app/scripts/jellyfin_data_fetc
 
 If you see the default Nginx welcome page, there might be an issue with the configuration:
 
+Check that the container finished starting. Nginx serves pages whether or not startup completed, so this file — written at the end of startup — is the real evidence:
+
+```bash
+curl http://your-server:9090/config.json
+```
+
+If it 404s, read the startup logs:
+
+```bash
+docker logs glimpse-media-viewer
+```
+
 Check if the app files are present
 
 ```bash
@@ -489,18 +504,37 @@ If media images aren't displaying:
 
 #### Server Toggle Not Appearing
 
-If you configured multiple servers but don't see the server dropdown:
+If you configured multiple servers but don't see the server switcher:
 
-1. Verify all server URLs and tokens are correct
-2. Check the container logs for authentication errors
-3. Ensure all servers are accessible from the container
-4. Try restarting the container after fixing configuration
+1. **Check what the container decided.** This is the quickest answer — the app shows a switcher only for the servers listed here:
+
+   ```bash
+   curl http://your-server:9090/config.json
+   ```
+
+   A server is listed only if **both** its URL and its token are set. A URL with no token is treated as unconfigured.
+
+2. Verify all server URLs and tokens are correct
+3. Check the container logs for authentication errors
+4. Ensure all servers are accessible from the container
+5. Try restarting the container after fixing configuration
 
 #### Wrong Theme Colors
 
-If the app shows the wrong theme:
+The theme follows the server you are viewing. If it looks wrong:
 
-1. Check your `PRIMARY_SERVER` setting
+1. **Check the resolved primary server:**
+
+   ```bash
+   curl http://your-server:9090/config.json
+   ```
+
+   If `primaryServer` isn't what you set, the container corrected it because that server had no credentials — the logs say so explicitly:
+
+   ```bash
+   docker logs glimpse-media-viewer | grep PRIMARY_SERVER
+   ```
+
 2. Clear your browser cache and reload
 3. Un-install and Re-install PWA
 

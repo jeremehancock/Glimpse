@@ -75,19 +75,34 @@ jobs:
             echo "::error::nginx never served a page"; docker logs glimpse; exit 1
           fi
 
-          # This is a weak assertion and deliberately marked as one. nginx serves
-          # /app/web whether or not the entrypoint finished — the boot script can
-          # die halfway and the container still answers 200 with the files baked
-          # into the image. So a green check here means "the container came up",
-          # not "the container is configured".
-          #
-          # The `application-shell` change replaces the entrypoint's HTML
-          # rewriting with a generated /app/web/config.json. That file is the
-          # evidence the boot script ran to completion, and asserting on it here
-          # is a task of that change:
-          #
-          #   curl -fsS http://127.0.0.1:8080/config.json | grep -q primaryServer
-          #
-          # Do not add that line before the entrypoint writes the file — it would
-          # gate every push on work that has not shipped yet.
-          echo "Smoke test passed (liveness only — see the comment above)"
+          # Readiness, not just liveness. nginx serves /app/web whether or not
+          # the entrypoint finished — the boot script can die halfway and the
+          # container still answers 200 with the files baked into the image. The
+          # generated config is the evidence that it ran to completion.
+          config="$(curl -fsS http://127.0.0.1:8080/config.json)" || {
+            echo "::error::config.json is not being served — the entrypoint did not finish"
+            docker logs glimpse; exit 1
+          }
+          echo "$config"
+          # One line on purpose: inside a YAML block scalar every line must be
+          # indented, and indented Python is a syntax error.
+          echo "$config" | python3 -c 'import json,sys; c=json.load(sys.stdin); assert c["primaryServer"]=="plex", c; assert [s["id"] for s in c["servers"]]==["plex"], c; assert c["sortByDateAdded"] is False, c' \
+            || { echo "::error::config.json did not describe the environment"; docker logs glimpse; exit 1; }
+
+          # The sub-route URLs are documented and bookmarkable. They used to be
+          # separate files written at boot; they are now the same page served by
+          # nginx, and nothing else in the pipeline would notice if they broke.
+          for route in / /plex/ /plex; do
+            code="$(curl -fsS -o /dev/null -w '%{http_code}' "http://127.0.0.1:8080${route}")"
+            [ "$code" = "200" ] || {
+              echo "::error::route ${route} returned ${code}, expected 200"
+              docker logs glimpse; exit 1
+            }
+          done
+
+          # The entrypoint must not have touched an authored file.
+          docker exec glimpse test ! -e /app/web/test.html || {
+            echo "::error::the entrypoint wrote into the web root"; exit 1
+          }
+
+          echo "Smoke test passed"

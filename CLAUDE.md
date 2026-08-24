@@ -119,18 +119,35 @@ it.
 
 ## Code conventions
 
-- **The entrypoint validates the environment and writes `/app/web/config.json`.
-  It never edits web assets.** The old entrypoint rewrote `index.html` with `sed`
-  at boot — per-server themes, an injected server dropdown, and a set of
-  "repair the file we corrupted" functions to clean up after itself. That is the
-  single largest source of past bugs in this project and it is not coming back.
+- **The entrypoint generates files. It never mutates authored ones.** Exactly two
+  files are generated: `/app/web/config.json` and `/app/web/manifest.json`.
+  `index.html`, `sw.js`, `offline.html` and everything under `images/` are
+  authored and read-only at runtime.
+
+  The distinction is not stylistic. A whole-file write is deterministic and its
+  output does not depend on how many times the container has started. The old
+  entrypoint rewrote `index.html` with `sed` on every boot — per-server themes,
+  an injected server dropdown, four copies of the page — and shipped
+  `cleanup_duplicate_server_content()` and `fix_corrupted_files()` to repair the
+  damage it did to its own output. `sed` fails *silently* when a pattern does not
+  match and is not idempotent over its own output; that pairing produced most of
+  this project's historical bugs. It is not coming back.
+
   Per-server theming is `data-server="jellyfin"` on `<html>` plus CSS custom
-  properties. If a behavior seems to need the entrypoint to touch a file under
-  `/app/web` other than `config.json`, it is a spec change to
-  `application-shell`, not a wiring decision.
+  properties. If a behavior seems to need the entrypoint to edit a file under
+  `/app/web`, it is a spec change to `application-shell`, not a wiring decision.
+  `make docker-smoke` asserts the web root is clean after boot.
 - **The frontend reads `config.json` once at boot into a single store.** Never
   re-read it, and never add a second source for a setting. The environment is
   read by the entrypoint and by nothing else.
+- **A missing or malformed `config.json` is reported, never defaulted around.** A
+  silent fallback recreates the exact failure this project spent years on: a
+  misconfigured install that looks like a working one, quietly showing the wrong
+  library — or an empty one indistinguishable from a server with no media.
+- **`Dockerfile` copies `scripts/` as a directory, not file by file.** The
+  per-file list silently omitted `glimpse_config.py` when it was added, and the
+  container refused to start at runtime rather than failing the build. A
+  directory copy cannot drift from what the entrypoint invokes.
 - **Emby and Jellyfin are one adapter with two identities**, not two code paths —
   their APIs are compatible, which is why one fetcher already serves both. A fix
   applied to one that isn't applied to the other is a bug, and the reason
