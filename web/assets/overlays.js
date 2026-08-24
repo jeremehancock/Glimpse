@@ -25,17 +25,27 @@
     /* ----------------------------------------------------------------------
        Drag to dismiss
 
-       A downward drag starting on the grab handle or the head — never on the
-       scrolling body — dismisses the overlay by clicking its own backdrop. That
-       indirection is the point: whatever an overlay does when its backdrop is
-       clicked is what it does when it is dragged away, so the gesture needs to
-       know nothing about which Alpine scope owns it.
+       A downward drag starting on the grab handle, the head, or a pinned region
+       above the body — never on the scrolling body — dismisses the overlay by
+       clicking its own backdrop. That indirection is the point: whatever an
+       overlay does when its backdrop is clicked is what it does when it is
+       dragged away, so the gesture needs to know nothing about which Alpine
+       scope owns it.
 
-       This relies on the markup keeping the drag region and the scrolling
-       region as SEPARATE elements. The grip and head carry `touch-action:
-       none`, which the browser honours only if they are not themselves the
-       scroller. Collapsing the head into the body would hand the gesture back
-       to the browser as a scroll, silently.
+       `.modal__fixed` is in the list because the detail overlay pins the item's
+       poster and metadata there. Once that block is visually part of the fixed
+       top of a tray, a drag on it that does nothing reads as broken — the user
+       is pulling on the largest still object on the screen.
+
+       Buttons inside a drag region keep working. A tap without movement ends
+       below the dismissal threshold, so nothing is dismissed and the click
+       proceeds; `touch-action: none` suppresses browser panning, not activation.
+
+       This relies on the markup keeping the drag regions and the scrolling
+       region as SEPARATE elements. They carry `touch-action: none`, which the
+       browser honours only if they are not themselves the scroller. Collapsing
+       the head into the body — or giving a pinned region its own overflow —
+       hands the gesture back to the browser as a scroll, silently.
        ---------------------------------------------------------------------- */
     (function () {
         let drag = null;
@@ -43,7 +53,9 @@
         document.addEventListener(
             'touchstart',
             function (e) {
-                const grip = e.target.closest('.sheet__grip, .sheet__head, .modal__head');
+                const grip = e.target.closest(
+                    '.sheet__grip, .sheet__head, .modal__head, .modal__fixed'
+                );
                 const panel = grip ? grip.closest('.sheet__panel, .modal__panel') : null;
                 if (!panel) return;
                 drag = {

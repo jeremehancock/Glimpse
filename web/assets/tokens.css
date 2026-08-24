@@ -35,6 +35,15 @@
     --backdrop-tint: rgba(0, 0, 0, 0.55);
     --backdrop-blur: blur(6px);
 
+    /* --- Overlay metrics ----------------------------------------------------
+       The grab handle's total height: .sheet__grip's top padding plus
+       .sheet__handle itself. A token because two files need to agree on it —
+       overlays.css draws the grip, and the detail overlay's artwork fades itself
+       out over exactly this distance so the handle never sits on a picture. Two
+       hardcoded 17s would drift the first time the grip's padding changed, and
+       the symptom would be an illegible handle on bright artwork only. */
+    --grip-height: 17px;
+
     /* --- Radii --- */
     --radius-sm: 6px;
     --radius-md: 10px;

@@ -176,6 +176,28 @@
     padding: 0 20px 20px;
 }
 
+/* A dialog may hold content ABOVE its scrolling body that does not scroll with
+   it — the detail overlay pins the item's poster and metadata there, so they
+   stay in view while the summary moves.
+
+   Three properties, and each is doing work. `flex: 0 0 auto` against the body's
+   `1 1 auto` is what makes one region hold and the other absorb. `position:
+   relative` gives the item's artwork a box to fill, so its extent follows the
+   layout instead of a hardcoded height. `touch-action: none` puts the region in
+   the drag gesture rather than leaving it a dead patch at the top of a tray —
+   see the selector list in overlays.js, which must name it too.
+
+   It must never become a scroller itself. `touch-action: none` here and on the
+   grip and head inside it is honoured only while none of them is the scrolling
+   container; make this one scroll and the browser silently takes the swipe back,
+   with no error and no visual difference on a desktop. Bound its height by
+   capping what grows inside it instead. */
+.modal__fixed {
+    flex: 0 0 auto;
+    position: relative;
+    touch-action: none;
+}
+
 .modal__head {
     flex: 0 0 auto;
     display: flex;

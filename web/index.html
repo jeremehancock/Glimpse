@@ -692,27 +692,85 @@
             transform: scale(1) translateY(0);
         }
 
-        /* The item's backdrop image, behind the head of the detail overlay.
-           Renamed from .modal-backdrop by the tray conversion, because that name
-           now belongs to the overlay system's own scrim and the two are
-           different things: this is artwork, that is a dimming layer. */
+        /* The item's backdrop image, behind the fixed region of the detail
+           overlay. Renamed from .modal-backdrop by the tray conversion, because
+           that name now belongs to the overlay system's own scrim and the two
+           are different things: this is artwork, that is a dimming layer.
+
+           `inset: 0` against .modal__fixed, NOT a height of its own. It used to
+           be `height: 280px` against the panel — a number sized for the desktop
+           dialog, where the identity block happens to be about that tall. On a
+           phone the panel is a tray and that number overshot the head by 214px
+           into the scrolling body, so the summary and cast slid underneath a
+           stationary picture. Filling its container instead makes the artwork's
+           extent a consequence of the layout rather than a constant that has to
+           be re-guessed for every viewport. */
         .modal-backdrop-art {
             position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 280px;
+            inset: 0;
             background-size: cover;
             background-position: center center;
             opacity: 0.35;
             z-index: 0;
             pointer-events: none;
+            /* Fade out under the grab handle. The artwork still reaches the
+               panel's top edge — the full-bleed look is the point — but the
+               handle is the one affordance that dismisses a tray, and it was
+               rendering on top of a picture.
+
+               Moving the artwork's top down instead would leave a hard band of
+               bare surface above it, which reads as a gap rather than a design.
+
+               A browser honouring neither property degrades to the previous
+               appearance, which is legible if imperfect — not a failure. */
+            -webkit-mask-image: linear-gradient(to bottom,
+                    transparent 0,
+                    #000 var(--grip-height));
+            mask-image: linear-gradient(to bottom,
+                    transparent 0,
+                    #000 var(--grip-height));
         }
 
-        /* The hamburger. Hidden by default and shown only at the mobile
-           breakpoint below — it opens the Actions tray, which is a touch shape.
+        /* The fixed region of the detail overlay: grip, title bar and the item's
+           identity block. Positioned so the artwork above can fill it.
 
-           These two rules were destroyed by the tray conversion: the script that
+           `flex: 0 0 auto` against .modal__body's `1 1 auto` is what makes the
+           division real — see the pairing in overlays.css. */
+        .modal__fixed {
+            position: relative;
+            flex: 0 0 auto;
+        }
+
+        /* The fixed region is bounded by CONSTRUCTION, not by its own scrollbar.
+
+           Giving it `overflow-y: auto` would be the obvious way to stop a long
+           title squeezing the summary out, and it is wrong: the region would
+           then BE a scroller, and `touch-action: none` on the grip and head
+           inside it is honoured only while they are not. It is also in the drag
+           gesture's selector list, so the browser and the gesture would both
+           claim the same downward swipe. That is the silent failure
+           `test_drag_regions_are_not_the_scroller` exists to catch, arrived at
+           from the other direction.
+
+           So the only part that can grow without limit is capped instead. The
+           poster has a fixed width and the metadata is short; clamping the title
+           bounds the whole region deterministically, with no scroller and
+           nothing clipped away. */
+        .modal__fixed .modal-title {
+            display: -webkit-box;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 3;
+            line-clamp: 3;
+            overflow: hidden;
+        }
+
+        /* The hamburger. Hidden by default; shown at ≤992px, paired with the
+           rule that withdraws the header's sort controls at that same width.
+           See the hand-off comment on that media query — the two belong
+           together, and splitting them is what opened the 769–992px band where
+           neither was reachable.
+
+           This rule was destroyed by the tray conversion: the script that
            removed the retired `.mobile-menu` CSS matched on substrings, and
            `.mobile-menu-button` contains `.mobile-menu`. The button lost its
            `display: none` and appeared on desktop. */
@@ -729,6 +787,10 @@
             justify-content: center;
         }
 
+        /* The item's identity block: poster, year, rating, duration, trailer.
+           Sits inside .modal__fixed, so it holds still while the summary, genres
+           and cast scroll beneath it. Its border is the division between the
+           two regions. `z-index: 1` lifts it over the artwork behind. */
         .modal-header {
             display: flex;
             align-items: flex-end;
@@ -810,18 +872,6 @@
         * {
             scrollbar-width: thin;
             scrollbar-color: var(--primary-color) rgba(0, 0, 0, 0.2);
-            scroll-behavior: smooth;
-        }
-
-        .modal-body {
-            padding: 30px;
-            overflow-y: auto;
-            display: flex;
-            flex-direction: column;
-            gap: 30px;
-            max-height: calc(90vh - 180px);
-            position: relative;
-            z-index: 1;
             scroll-behavior: smooth;
         }
 
@@ -1039,20 +1089,42 @@
         }
 
         /* Mobile responsiveness */
+
+        /* Below this width the header cannot hold logo + search + two tabs +
+           four sort controls: the tabs row overflows .header-content at 850px
+           and the search container is down to 54px well before that. So the
+           page copy withdraws and the Actions overlay carries these instead.
+
+           `.header-content` is load-bearing, not decoration. The Actions
+           overlay's body IS a `.sort-toggle`, and it is teleported to <body> —
+           so an unqualified selector here matches it too and empties the
+           overlay it was never aimed at. That is exactly what happened: the
+           overlay opened with its handle, its title, and nothing else.
+
+           The two rules below are one hand-off and must move together. The
+           trigger appears at the same width the controls leave, or there is a
+           band with neither — which there was, from 769px to 992px, where a
+           tablet had no sort, no genre filter and no server switch at all. */
         @media screen and (max-width: 992px) {
-            .sort-toggle {
+            .header-content .sort-toggle {
                 display: none;
             }
-        }
 
-        @media screen and (max-width: 768px) {
-            /* Shown only here: it opens the Actions tray, which is a touch
-               shape. Restored after the tray conversion stripped it. */
+            /* It opens the Actions overlay. Above 768px that overlay presents
+               as a centred dialog rather than a bottom tray — see the
+               pointer block in overlays.css — which is the right shape for a
+               tablet and needs no special casing here.
+
+               This rule was destroyed once already: the script that removed the
+               retired `.mobile-menu` CSS matched on substrings, and
+               `.mobile-menu-button` contains `.mobile-menu`. */
             .mobile-menu-button {
                 display: flex;
                 order: 3;
             }
+        }
 
+        @media screen and (max-width: 768px) {
             :root {
                 --mobile-header-height: 70px;
             }
@@ -1092,8 +1164,11 @@
                 display: none;
             }
 
+            /* No margin-top. It was clearance for the close × that used to float
+               in this panel's top corner; on touch that button is hidden and the
+               grip and title bar sit above this block anyway, so the 40px was
+               spending the fixed region's height budget on nothing. */
             .modal-header {
-                margin-top: 40px;
                 padding: 20px;
                 gap: 20px;
             }
@@ -1107,19 +1182,12 @@
 
             .modal-title {
                 font-size: 1.5em;
-
             }
 
             .media-title {
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
-            }
-
-            .modal-body {
-                padding: 20px;
-                gap: 20px;
-                scroll-behavior: smooth;
             }
 
             .cast-grid {
@@ -1181,16 +1249,8 @@
                 font-size: 0.75em;
             }
 
-            .modal-header {
-                margin-top: 40px;
-            }
-
             .modal-title {
                 font-size: 1.4em;
-            }
-
-            .modal-body {
-                scroll-behavior: smooth;
             }
 
             .modal-section-title {
@@ -1285,14 +1345,50 @@
             }
         }
 
-        /* Mobile server toggle styling */
-        @media screen and (max-width: 768px) {
-            .sheet__body .server-toggle-button {
-                width: 100%;
-                justify-content: center;
-                margin-top: 10px;
-                padding: 10px;
-            }
+        /* ---- The Actions overlay's control list -------------------------
+           The overlay reuses the header's `.sort-toggle` markup, and the header
+           lays that out as a horizontal row of pills. In an overlay it is a
+           stacked list, so the direction has to be restated here.
+
+           This was invisible until the overlay stopped being empty: with the
+           block hidden by the unqualified `display: none` above, nothing showed
+           that its four children were running off the right edge — measured at
+           390px, the body's scrollWidth was 524 against a client width of 388,
+           putting "Switch server" and "Install App" past the panel entirely.
+
+           Scoped on `.sheet__body` and deliberately NOT wrapped in a media
+           query. The overlay is an overlay at every width it appears, and it now
+           appears from 992px down; a breakpoint here would only be a second
+           number to keep in step with the hand-off above. */
+        .sheet__body .sort-toggle {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 10px;
+            margin-left: 0;
+        }
+
+        /* The two sort options are alternatives to each other, so they sit side
+           by side and split the width. Everything below them is its own action
+           and gets its own line. `.sort-row` carries no styling outside an
+           overlay — it exists only to make this pairing possible. */
+        .sheet__body .sort-row {
+            display: flex;
+            gap: 10px;
+        }
+
+        .sheet__body .sort-row .sort-button {
+            flex: 1;
+        }
+
+        /* `align-self` is restated, not inherited from the container's
+           `align-items: stretch`. The install button carries
+           `align-self: center` of its own, which wins against the container and
+           left it sitting at its intrinsic width in a column of full-width
+           controls. */
+        .sheet__body .sort-button {
+            align-self: stretch;
+            justify-content: center;
+            padding: 10px;
         }
     </style>
 </head>
@@ -1527,16 +1623,32 @@
         <div class="modal__backdrop" @click="detailOpen = false"></div>
         <div class="modal__panel modal__panel--wide" role="dialog" aria-modal="true"
             aria-labelledby="detail-title" tabindex="-1">
-            <div class="sheet__grip"><span class="sheet__handle"></span></div>
-            <!-- The item's backdrop art, behind the head. Absolutely positioned
-                 and inert; it is texture, not content. -->
-            <div class="modal-backdrop-art" aria-hidden="true"></div>
-            <div class="modal__head">
-                <h2 id="detail-title" class="modal-title">Title</h2>
-                <button class="overlay__close" @click="detailOpen = false"
-                    aria-label="Close">×</button>
-            </div>
-            <div class="modal__body">
+            <!-- The FIXED region. Everything that identifies the item holds
+                 still; only the prose below it scrolls.
+
+                 It is a real element rather than `position: sticky` on the
+                 poster block, and that is load-bearing twice over.
+
+                 A sticky element is still inside the scroller, so
+                 `touch-action: none` on it cannot be honoured — the browser
+                 takes the downward drag back as a scroll, silently, which is the
+                 trap `test_drag_regions_are_not_the_scroller` exists to catch.
+                 And the artwork needs an element whose box it can fill; with a
+                 sticky child there is nothing for it to key to, which is how it
+                 ended up a hardcoded 280px that overshot the head by 214px and
+                 sat behind scrolling content. -->
+            <div class="modal__fixed">
+                <div class="sheet__grip"><span class="sheet__handle"></span></div>
+                <!-- The item's backdrop art. Absolutely positioned and inert; it
+                     is texture, not content. `inset: 0` against this container
+                     rather than a fixed height against the panel, so it cannot
+                     reach the scrolling region for any content at any width. -->
+                <div class="modal-backdrop-art" aria-hidden="true"></div>
+                <div class="modal__head">
+                    <h2 id="detail-title" class="modal-title">Title</h2>
+                    <button class="overlay__close" @click="detailOpen = false"
+                        aria-label="Close">×</button>
+                </div>
                 <div class="modal-header">
                     <div class="modal-poster">
                         <!-- Poster populated by openModal() -->
@@ -1550,7 +1662,8 @@
                         <div class="modal-actions"></div>
                     </div>
                 </div>
-
+            </div>
+            <div class="modal__body">
                 <div class="modal-section summary-section">
                     <div class="modal-section-title">Overview</div>
                     <div id="modal-summary">Loading summary...</div>
@@ -3021,14 +3134,17 @@
                 gap: 10px;
             }
             
-            /* Mobile install button styling */
+            /* The install button inside the Actions overlay. Width, centring and
+               padding come from the .sheet__body rules in the authored
+               stylesheet; what is left here is the colour and the cancellation
+               of .install-button's own margin-left.
+
+               No margin-top: the overlay's list is a flex column with its own
+               gap, and an extra margin here spaced this one control 20px from
+               its neighbour where every other pair sat at 10px. */
             .mobile-install-button {
-                width: 100%;
-                justify-content: center;
-                margin-top: 10px;
-                padding: 10px;
                 color: #fff !important;
-                margin-left: 0px;
+                margin-left: 0;
             }
             
             .install-icon {

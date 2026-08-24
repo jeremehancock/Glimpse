@@ -24,7 +24,7 @@ log. Delete it when the rewrite lands.
 
 `make check` is green (98 tests). CI is green on `dev`.
 
-### Two OpenSpec changes are implemented but NOT archived
+### Three OpenSpec changes are implemented but NOT archived
 
 ```bash
 openspec list
@@ -33,9 +33,35 @@ openspec list
 - **`replace-boot-time-html-rewriting`** — 50/51. Only "validate `:dev`" remains.
 - **`convert-overlays-to-trays`** — 42/44. Reduced motion and real touch/swipe
   feel still need a physical device.
+- **`pin-detail-header-and-fix-actions-tray`** — 27/28, and **the user has
+  reported that visual issues remain**. See below before treating it as done.
 
-**Do not archive either until the user has validated a `:dev` image.** Archiving
-rewrites `openspec/specs/`, which becomes the source of truth.
+  It fixes the Actions overlay opening empty on a phone, closes the 769–992px
+  band where a tablet had no sort, genre filter or server switch, and gives the
+  detail overlay a pinned region so the poster stays in view while the summary
+  scrolls. Two faults it uncovered along the way are worth knowing about:
+  the overlay's controls were laid out as a horizontal row and ran off the panel
+  (invisible for as long as the block was hidden), and the header genuinely
+  cannot fit its sort controls below ~992px — which is why the hamburger moved
+  **up** to 992 rather than the hide rule moving down to 767.
+
+**Do not archive any of them until the user has validated a `:dev` image.**
+Archiving rewrites `openspec/specs/`, which becomes the source of truth.
+
+### `pin-detail-header-and-fix-actions-tray` is NOT finished
+
+On 2026-08-24 the user reviewed it and said *"that is better, but I still see
+some issues"*, then cleared context to describe them in a fresh session. **They
+have not been described yet.**
+
+So: do not read 27/28 as "one physical-device check away from done". **Ask what
+the remaining issues are before changing anything.** Guessing from the diff will
+produce work the user did not ask for, and the two faults this change already
+uncovered by accident are evidence that this area has more in it than the
+markup shows.
+
+The unchecked task 9.1 is a genuine physical-device check (drag feel and handle
+contrast in daylight) and is separate from whatever the user is seeing.
 
 ---
 
@@ -58,12 +84,21 @@ a separate phone drawer, is now one implementation.
 
 ## What is left
 
-1. **Validate `:dev`** — the gate on everything else. See "Building `:dev`".
-2. **Split `web/index.html` into ES modules.** The planned third change, not yet
+1. **Hear out the user's remaining issues** with
+   `pin-detail-header-and-fix-actions-tray` — see above. They exist and have not
+   been described.
+2. **Validate `:dev`** — the gate on everything else. See "Building `:dev`".
+3. **Split `web/index.html` into ES modules.** The planned change, not yet
    proposed. `index.html` is still ~4,000 lines and carries a temporary config
    adapter, marked in-file with the change name that should remove it.
-3. **Then** archive both changes, bump `VERSION` past `1.3.0`, and reopen the
-   `main` bootstrap (below).
+4. **Regenerate the screenshots in `assets/`.** All six predate the rewrite —
+   `screenshot-details-*` in particular show the detail view as a centred box
+   with a corner close button, which is the presentation the tray conversion
+   replaced. They are served from `main`, so they will not look wrong to anyone
+   until the rewrite merges, and then all six will at once. This needs a real
+   media library, so it is a release-time task rather than a per-change one.
+5. **Then** archive all three changes, bump `VERSION` past `1.3.0`, and reopen
+   the `main` bootstrap (below).
 
 ---
 

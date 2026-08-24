@@ -296,3 +296,209 @@ def test_actions_tray_does_not_duplicate_the_tab_switcher(html):
     assert 'data-content="movies"' not in tray.group(0), (
         'the Actions tray lists content-type tabs; swipe already does this'
     )
+
+
+# --------------------------------------------------------------------------
+# Page rules reaching into overlays
+# --------------------------------------------------------------------------
+
+
+def test_no_page_rule_hides_the_actions_overlays_controls(html):
+    """The Actions overlay opened with its handle, its title, and nothing else.
+
+    `.sort-toggle { display: none }` inside a mobile media query meant "hide the
+    HEADER's sort controls". But the overlay's body IS a `.sort-toggle` — its
+    only child — so the rule emptied the overlay it was never aimed at. Measured
+    at 390px: the body was 20px tall, which was its own bottom padding.
+
+    Nothing errored. The overlay animated in correctly and was correctly
+    attributed; it simply had no contents. A rule that hides a page control has
+    to say which one, or it reaches every copy of that markup in the document.
+    """
+    css = strip_comments(html)
+
+    for match in re.finditer(r'([^{}]*)\{([^{}]*)\}', css):
+        selectors, body = match.group(1), match.group(2)
+        if 'display' not in body or 'none' not in body:
+            continue
+        for selector in selectors.split(','):
+            selector = selector.strip()
+            if not selector.endswith('.sort-toggle'):
+                continue
+            assert '.header-content' in selector, (
+                f'{selector!r} hides every .sort-toggle in the document, '
+                'including the Actions overlay body, which is one'
+            )
+
+
+def test_the_actions_overlays_trigger_appears_where_the_header_controls_leave(html):
+    """There must be no width at which both are hidden.
+
+    The header's sort controls withdrew at 992px and the hamburger only arrived
+    at 768px, so between 769px and 992px a tablet had no sort, no genre filter
+    and no server switch — and no trigger for the overlay that carries them.
+
+    The two rules are one hand-off. Splitting them is silent: each rule looks
+    correct on its own, and the gap only exists at widths nobody tests at.
+    """
+    css = strip_comments(html)
+
+    media_block = r'@media[^{]*?max-width:\s*(\d+)px[^{]*?\{(.*?)\n        \}'
+    blocks = [(int(m.group(1)), m.group(2)) for m in re.finditer(media_block, css, re.S)]
+
+    def blocks_containing(selector: str) -> list[int]:
+        return [width for width, body in blocks if re.search(re.escape(selector) + r'\s*\{', body)]
+
+    sort_hidden = blocks_containing('.header-content .sort-toggle')
+    trigger_shown = blocks_containing('.mobile-menu-button')
+
+    assert sort_hidden, 'the header sort controls are never withdrawn'
+    assert trigger_shown, 'the hamburger is never shown'
+
+    # Asserted as CO-LOCATION, not as two numbers that happen to agree today.
+    # The pair is one hand-off, and the only way to guarantee they cannot drift
+    # apart is to require they be declared together. Comparing two breakpoints
+    # would pass the moment someone moved one rule to a block that happens to
+    # carry the same width, and would say nothing about the next edit to either.
+    assert set(sort_hidden) == set(trigger_shown), (
+        f'the header controls withdraw at {sort_hidden}px but the overlay '
+        f'trigger appears at {trigger_shown}px. These are one hand-off and '
+        'belong in the same media query — split apart, the widths between them '
+        'have no way to sort, filter by genre or switch server, which is '
+        'exactly what happened from 769px to 992px'
+    )
+
+
+def test_the_actions_overlay_stacks_its_controls(html):
+    """The overlay reuses the header's markup, and the header lays it out as a
+    horizontal ROW of pills.
+
+    Left as a row inside a 390px overlay the four controls ran off the right
+    edge — measured scrollWidth 524 against a client width of 388, putting
+    "Switch server" and "Install App" outside the panel. This was invisible for
+    as long as the block was hidden by the bug above, so fixing that one exposed
+    this one.
+    """
+    css = strip_comments(html)
+    rule = re.search(r'\.sheet__body \.sort-toggle\s*\{([^}]*)\}', css)
+    assert rule, 'the Actions overlay does not restate its layout direction'
+    assert 'column' in rule.group(1), (
+        'the overlay lays its controls out as a row; they overflow the panel'
+    )
+
+
+# --------------------------------------------------------------------------
+# The detail overlay's fixed region
+# --------------------------------------------------------------------------
+
+
+def test_the_item_identity_block_is_not_inside_the_scroller(html):
+    """The poster, year, rating and trailer control must hold still.
+
+    They were the first child of `.modal__body`, which is the scrolling region,
+    so reading the summary carried away the very thing being read about.
+    """
+    code = strip_comments(html)
+    body = re.search(r'<div class="modal__body">(.*?)\n            </div>', code, re.S)
+    assert body, 'the detail overlay body was not found — has the markup moved?'
+    assert 'modal-header' not in body.group(1), (
+        'the item identity block is inside the scrolling body, so it scrolls away'
+    )
+
+    fixed = re.search(r'<div class="modal__fixed">(.*?)\n            </div>', code, re.S)
+    assert fixed, 'the detail overlay has no fixed region'
+    assert 'modal-header' in fixed.group(1), 'the identity block is not in the fixed region'
+
+
+def test_the_fixed_region_is_not_itself_a_scroller():
+    """`.modal__fixed` carries `touch-action: none` and is in the drag gesture's
+    selector list. Both are honoured only while it is not the scrolling
+    container.
+
+    Giving it `overflow-y: auto` is the obvious way to stop a long title
+    squeezing out the summary, and it would silently hand the downward swipe
+    back to the browser — the same failure as nesting a head inside its body,
+    reached from the other direction. The height is bounded by capping what
+    grows inside it instead.
+    """
+    css = (WEB / 'assets' / 'overlays.css').read_text()
+    rule = re.search(r'\.modal__fixed\s*\{([^}]*)\}', css)
+    assert rule, '.modal__fixed has no rule in the overlay stylesheet'
+    assert 'touch-action: none' in rule.group(1), (
+        'the fixed region is not in the drag gesture, so it is a dead patch at the top of the tray'
+    )
+    assert 'overflow' not in rule.group(1), (
+        'the fixed region is a scroller, which silently disables the drag gesture'
+    )
+
+
+def test_a_long_title_cannot_squeeze_out_the_scrolling_region(html):
+    """With the title unclamped, a 13-line title left the scrolling region 20px
+    tall — measured at 390x667. The poster has a fixed width and the metadata is
+    short, so the title is the only part that can grow without limit."""
+    css = strip_comments(html)
+    rule = re.search(r'\.modal__fixed \.modal-title\s*\{([^}]*)\}', css)
+    assert rule, 'the detail title is unbounded; a long one squeezes out the summary'
+    assert 'line-clamp' in rule.group(1)
+
+
+def test_the_backdrop_artwork_cannot_reach_the_scrolling_region(html):
+    """It was `height: 280px` against the panel — a number sized for the desktop
+    dialog, where the identity block happens to be about that tall.
+
+    On a phone it overshot the head by 214px into the scrolling body, so the
+    summary and cast slid beneath a stationary picture. Filling its container
+    makes the extent a consequence of the layout instead of a constant that has
+    to be re-guessed per viewport.
+    """
+    css = strip_comments(html)
+    rule = re.search(r'\.modal-backdrop-art\s*\{([^}]*)\}', css)
+    assert rule, 'the backdrop artwork has no rule'
+    assert 'inset: 0' in rule.group(1), (
+        'the artwork is sized independently of the fixed region, so it can '
+        'extend into scrolling content'
+    )
+    assert not re.search(r'height:\s*\d', rule.group(1)), 'the artwork has a fixed height again'
+
+
+def test_the_backdrop_artwork_does_not_cover_the_grab_handle(html):
+    """The handle is the only affordance that dismisses a tray, and it was
+    rendering on top of the item's artwork."""
+    css = strip_comments(html)
+    rule = re.search(r'\.modal-backdrop-art\s*\{([^}]*)\}', css)
+    assert rule
+    # Both spellings. The unprefixed property alone leaves older WebKit — which
+    # is to say a large share of the phones this tray shape exists for — showing
+    # the handle on top of the picture, and that is the one browser where the
+    # handle is the only way to dismiss.
+    assert 'mask-image' in rule.group(1), 'the artwork runs under the grab handle'
+    assert '-webkit-mask-image' in rule.group(1), (
+        'no prefixed mask, so older WebKit still draws artwork under the handle'
+    )
+    assert '--grip-height' in rule.group(1), (
+        'the fade distance is hardcoded rather than tied to the grip, so the '
+        'two drift the first time the grip padding changes'
+    )
+    tokens = (WEB / 'assets' / 'tokens.css').read_text()
+    assert '--grip-height:' in tokens, 'the grip height token is not declared'
+
+
+def test_the_drag_gesture_selectors_all_exist_in_the_markup(html):
+    """The gesture arms by `closest()` on a class list. A name in that list that
+    no element carries is not an error — it simply never matches, and the region
+    silently stops being draggable."""
+    js = (WEB / 'assets' / 'overlays.js').read_text()
+    call = re.search(r"closest\(\s*\n?\s*'([^']*)'\s*\n?\s*\)", js)
+    assert call, 'the drag gesture selector list was not found'
+
+    code = strip_comments(html)
+    present = set()
+    for attr in re.findall(r'class="([^"]*)"', code):
+        present.update(attr.split())
+
+    for selector in call.group(1).split(','):
+        cls = selector.strip().lstrip('.')
+        assert cls in present, (
+            f'the drag gesture arms on {cls!r} but no element carries it, '
+            'so that region cannot be dragged'
+        )

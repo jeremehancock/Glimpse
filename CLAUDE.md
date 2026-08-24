@@ -182,10 +182,30 @@ it.
     this today — the Actions tray's genre button, the detail overlay's trailer
     button — say so in a comment.
   - **The drag region and the scrolling region must stay separate elements.**
-    `.sheet__grip` and `.sheet__head` carry `touch-action: none`, which the
-    browser honours only if they are not themselves the scroller. Nesting a head
-    inside `.sheet__body` hands the gesture back to the browser as a scroll —
-    silently, with no error and no visual difference on a desktop.
+    `.sheet__grip`, `.sheet__head` and `.modal__fixed` carry `touch-action:
+    none`, which the browser honours only if they are not themselves the
+    scroller. Nesting a head inside `.sheet__body` hands the gesture back to the
+    browser as a scroll — silently, with no error and no visual difference on a
+    desktop.
+  - **A panel may have a third region: `.modal__fixed`, which holds still while
+    `.modal__body` scrolls under it.** The detail overlay pins the item's poster
+    and metadata there so they stay in view. It is a real element, never
+    `position: sticky` on a child of the body — a sticky element is still inside
+    the scroller, so its `touch-action: none` cannot be honoured. **Never give it
+    an `overflow`.** Bounding it by capping what grows inside it (the title is
+    line-clamped) keeps the drag gesture working; giving it a scrollbar is the
+    same silent failure as nesting a head in a body, reached from the other side.
+    The item's artwork fills it with `inset: 0`, so the artwork's extent is a
+    consequence of the layout rather than a height someone has to re-guess per
+    viewport — it used to be a hardcoded `280px` that overshot into scrolling
+    content on every phone.
+  - **A rule that hides a page control must name where that control lives.**
+    `.sort-toggle { display: none }` in a mobile media query meant "the header's
+    sort controls", but the Actions overlay's body *is* a `.sort-toggle`, so the
+    rule emptied it — handle, title, and nothing else. Scope such rules to
+    `.header-content`. The pair that hides a page control and shows the overlay
+    trigger that replaces it belongs in **one media query**: split apart they had
+    drifted to 992px and 768px, leaving every width between with neither.
   - **A closing overlay is not an open one.** Both the scroll lock and the focus
     manager skip anything carrying `.overlay-closing`. Waiting for `display:none`
     instead pins the page for a beat after every dismissal, so the first flick is
