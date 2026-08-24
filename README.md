@@ -264,6 +264,15 @@ Glimpse/
 │
 ├── docker-compose.yml        # Docker Compose configuration
 ├── Dockerfile                # Docker build configuration
+├── VERSION                   # Drives the pinned image tag, git tag, and Release
+├── Makefile                  # Quality gates (make lint / make test / make check)
+│
+├── docs/
+│   ├── development-workflow.md  # Branches, releases, and the OpenSpec flow
+│   └── docker.md                # The image, the entrypoint, the smoke test
+│
+├── tests/                    # pytest
+├── openspec/                 # Capability specs and in-flight changes
 │
 ├── scripts/
 │   ├── plex_data_fetcher.py  # Python script to fetch Plex data
@@ -518,6 +527,42 @@ To get detailed library information for troubleshooting exclusions, check the lo
 ### Using Behind a Reverse Proxy
 
 This application works well behind a reverse proxy like Traefik or Nginx Proxy Manager. Just expose the container port and configure your proxy accordingly.
+
+## 🐳 Docker Images
+
+Images are published to Docker Hub automatically by CI.
+
+| Tag | What it is |
+| --- | --- |
+| `bozodev/glimpse-media-viewer:latest` | Production. Every merge to `main` refreshes it. |
+| `bozodev/glimpse-media-viewer:dev` | The `dev` branch. New work, not yet released — use a throwaway instance. |
+| `bozodev/glimpse-media-viewer:<version>` | A pinned release, e.g. `1.3.0`. Never overwritten once published. |
+| `bozodev/glimpse-media-viewer:sha-<short>` | An immutable build of one commit, handy for rollbacks. |
+
+The compose file above uses `:latest`. Pin a version instead if you would rather
+upgrade deliberately:
+
+```yaml
+image: bozodev/glimpse-media-viewer:1.3.0
+```
+
+## 🧑‍💻 Development
+
+Glimpse is developed spec-first: every capability has an OpenSpec spec before it
+is built. Work happens on `dev`; `main` is release-only.
+
+```bash
+make install     # ruff, pytest + npm ci
+make check       # lint + test — the same gates CI runs on every push
+make fmt         # apply every fix lint would ask for
+make docker-smoke  # build the image and prove the container serves
+```
+
+Nothing in `web/` is built or bundled — nginx serves those files exactly as
+authored, and no Node runs in the image. Node is development tooling only.
+
+See [docs/development-workflow.md](docs/development-workflow.md) for the branch
+and release flow, and [docs/docker.md](docs/docker.md) for the image.
 
 ## 🔐 Security Considerations
 

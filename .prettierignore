@@ -1,0 +1,30 @@
+node_modules
+data
+assets
+web/images
+.pytest_cache
+
+# Prettier is the frontend's formatter, not a prose tool. Markdown here is
+# documentation whose line breaks are deliberate — CLAUDE.md, the docs/, and the
+# spec deltas all read as hand-wrapped paragraphs — and reflowing them would bury
+# real edits in whitespace. `openspec/` and `.claude/` are further off-limits:
+# their contents are generated or vendored by the OpenSpec CLI, so a local
+# reformat is reverted the next time the tool writes them.
+*.md
+openspec
+.claude
+
+# docker-compose.yml is the frozen user-facing surface. Its comments and
+# alignment are documentation that users read and copy; reformatting it would
+# churn a file every install has a copy of. See CLAUDE.md.
+docker-compose.yml
+
+# The legacy single-file app. 4,000 lines of HTML with inline <style> and
+# <script>, hand-formatted over years. Reformatting it would produce an enormous
+# diff on files the rewrite deletes. These entries are removed with them.
+web/index.html
+web/sw.js
+web/offline.html
+
+# Generated at container start by config/entrypoint.sh; never authored here.
+web/config.json

@@ -1,0 +1,22 @@
+# Node tooling (lint/format only — never shipped in the image)
+/node_modules/
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+*.py[cod]
+
+# The snapshot the fetchers write. It is a mounted volume in production and
+# regenerated on every run — megabytes of posters that must never be committed.
+/data/*
+!/data/.gitkeep
+
+# Generated at container start by config/entrypoint.sh
+/web/config.json
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.log

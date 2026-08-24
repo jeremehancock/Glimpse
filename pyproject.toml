@@ -1,0 +1,57 @@
+[project]
+name = "glimpse"
+description = "Fetchers that snapshot a Plex / Jellyfin / Emby library to disk for the Glimpse viewer"
+requires-python = ">=3.13"
+dynamic = ["version"]
+dependencies = ["requests"]
+
+[project.optional-dependencies]
+dev = ["ruff", "pytest", "pyyaml"]
+
+[tool.setuptools.dynamic]
+version = { file = "VERSION" }
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+src = ["scripts", "tests"]
+
+# The legacy fetchers, written before this gate existed. They fail it 187 times,
+# and fixing that would churn two files the rewrite replaces with the
+# `scripts/glimpse/` package.
+#
+# This list is the rewrite's checklist, not a permanent carve-out: each entry is
+# deleted along with the file it names, and when the list is empty the block goes
+# too. Nothing else may be added here — a NEW file that cannot pass the gate is a
+# file that is not ready to commit.
+extend-exclude = [
+    "scripts/plex_data_fetcher.py",
+    "scripts/jellyfin_data_fetcher.py",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "W",    # pycodestyle warnings
+    "I",    # isort — import order
+    "UP",   # pyupgrade — don't write 3.8 in a 3.13 image
+    "B",    # bugbear
+    "C4",   # comprehensions
+    "SIM",  # simplify
+    "PTH",  # prefer pathlib; the fetchers already use it, keep them consistent
+    "RUF",
+]
+ignore = [
+    # The fetchers are batch jobs whose progress output IS the log. print() is
+    # the interface: `docker logs` is how a user watches an import run.
+    "T201",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Asserting on a private helper is the point of a unit test.
+"tests/*" = ["S101"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
