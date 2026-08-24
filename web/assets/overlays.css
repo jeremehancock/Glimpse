@@ -329,6 +329,63 @@
 }
 
 /* --------------------------------------------------------------------------
+   Pointer presentation
+
+   A tray is a TOUCH shape. Docked to the bottom edge, full-bleed, dismissed by
+   dragging a handle — all of which assumes a thumb. On a desktop it is simply a
+   panel glued to the bottom of a large screen, with a drag affordance that
+   promises a gesture nobody is going to make with a mouse.
+
+   So above the touch breakpoint a `.sheet` presents as a centred dialog. The
+   markup does not change and neither does any behavior: the backdrop still
+   dismisses, Escape still closes, focus is still managed. Only the shape moves.
+
+   This block is what makes "a tray on touch, a dialog on a pointer device" true
+   for the menu, genre and server overlays. Without it they render as bottom
+   sheets at every width, which is exactly what a desktop user reported.
+   -------------------------------------------------------------------------- */
+
+@media (min-width: 768px) {
+    .sheet {
+        align-items: center;
+        padding: 16px;
+    }
+
+    .sheet__panel {
+        width: min(560px, 100%);
+        max-height: 80vh;
+        border-bottom: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--elev-4);
+    }
+
+    /* The handle is a drag affordance and there is no drag here. */
+    .sheet__grip {
+        display: none;
+    }
+
+    /* Head padding did the spacing below the handle; without the handle the
+       title needs the dialog's own top padding instead. */
+    .sheet__head {
+        padding-top: 18px;
+    }
+
+    /* Scale like a dialog rather than sliding up from an edge it is no longer
+       docked to. These override the tray rules above, so they must come after. */
+    .overlay-opening .sheet__panel {
+        transition: transform var(--dur-base) var(--ease-entrance);
+    }
+
+    .overlay-shut .sheet__panel {
+        transform: scale(0.96);
+    }
+
+    .overlay-shown .sheet__panel {
+        transform: scale(1);
+    }
+}
+
+/* --------------------------------------------------------------------------
    Touch presentation
 
    Below this width a dialog that opted in becomes a tray: docked to the bottom

@@ -209,3 +209,90 @@ def test_no_control_explains_itself_only_in_a_tooltip(html):
         assert 'data-tooltip' not in match.group(0), (
             'a switched-off control explains itself only where touch cannot reach'
         )
+
+
+# --------------------------------------------------------------------------
+# Regressions from the first tray build
+#
+# Every test below corresponds to a bug that shipped to :dev and was found by
+# hand, not by the suite. They are here because the suite passed while the app
+# was broken — structure was asserted, behavior was not.
+# --------------------------------------------------------------------------
+
+
+def test_openmodal_selectors_match_the_markup(html):
+    """The detail overlay and roulette both went blank because openModal()
+    queried elements this change had renamed.
+
+    `.modal-backdrop` became `.modal-backdrop-art` (the old name now belongs to
+    the overlay system's scrim) and `.modal-body` became `.modal__body`. Both
+    returned null, both threw, and roulette died with the detail view because it
+    opens through the same function. Nothing in the suite noticed: the overlay
+    was present and correctly attributed, which is all the markup tests looked
+    at.
+
+    Matched against the class attributes that actually exist in the markup —
+    not against the file as text, which would find the name in a comment
+    explaining the rename and pass while the app was broken.
+    """
+    code = strip_comments(html)
+
+    present = set()
+    # Authored markup.
+    for attr in re.findall(r'class="([^"]*)"', code):
+        present.update(attr.split())
+    # Elements built at runtime — e.g. the retry button, whose querySelector is
+    # an "already exists?" guard rather than a lookup of authored markup.
+    for attr in re.findall(r'className\s*=\s*[\'"]([^\'"]*)[\'"]', code):
+        present.update(attr.split())
+    for attr in re.findall(r'classList\.add\(([^)]*)\)', code):
+        present.update(re.findall(r'[\'"]([A-Za-z0-9_-]+)[\'"]', attr))
+
+    queried = re.findall(r"querySelector(?:All)?\('([^']*\.modal[^']*)'\)", code)
+    assert queried, 'no modal selectors found — has openModal moved?'
+
+    for selector in queried:
+        leaf = selector.split()[-1]
+        for cls in re.findall(r'\.([A-Za-z0-9_-]+)', leaf):
+            assert cls in present, (
+                f'openModal queries {selector!r} but no element carries '
+                f'class {cls!r} — querySelector returns null and openModal throws'
+            )
+
+
+def test_hamburger_keeps_its_own_styling(html):
+    """`.mobile-menu-button` lost every rule it had.
+
+    The script that stripped the retired `.mobile-menu` CSS matched on
+    substrings, and `.mobile-menu-button` contains `.mobile-menu`. The button
+    lost its `display: none` and appeared on desktop, where it opens a tray that
+    is a touch shape.
+    """
+    assert '.mobile-menu-button {' in html, 'the hamburger has no styling at all'
+    rule = html[html.index('.mobile-menu-button {') :]
+    assert 'display: none' in rule[: rule.index('}')], (
+        'the hamburger is not hidden by default, so it shows on desktop'
+    )
+
+
+def test_trays_become_dialogs_on_a_pointer_device():
+    """A tray is a touch shape: bottom-docked, full-bleed, dragged away by a
+    thumb. On a desktop it is a panel glued to the bottom of a large screen with
+    a drag affordance nobody will use. The menu, genre and server overlays
+    rendered that way at every width until this rule existed."""
+    css = (WEB / 'assets' / 'overlays.css').read_text()
+    assert '@media (min-width: 768px)' in css
+    block = css[css.index('@media (min-width: 768px)') :]
+    assert 'align-items: center' in block, 'trays do not centre on a pointer device'
+    assert '.sheet__grip' in block, 'the grab handle is not hidden on a pointer device'
+
+
+def test_actions_tray_does_not_duplicate_the_tab_switcher(html):
+    """Switching content type is a horizontal swipe on the grid, and the header
+    tabs are hidden at tray widths. Listing Movies / TV Shows in the tray made it
+    look like the tray was the way to do it."""
+    tray = re.search(r'aria-label="Actions".*?</template>', strip_comments(html), re.S)
+    assert tray, 'Actions tray not found'
+    assert 'data-content="movies"' not in tray.group(0), (
+        'the Actions tray lists content-type tabs; swipe already does this'
+    )

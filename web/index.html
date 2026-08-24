@@ -692,6 +692,43 @@
             transform: scale(1) translateY(0);
         }
 
+        /* The item's backdrop image, behind the head of the detail overlay.
+           Renamed from .modal-backdrop by the tray conversion, because that name
+           now belongs to the overlay system's own scrim and the two are
+           different things: this is artwork, that is a dimming layer. */
+        .modal-backdrop-art {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 280px;
+            background-size: cover;
+            background-position: center center;
+            opacity: 0.35;
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        /* The hamburger. Hidden by default and shown only at the mobile
+           breakpoint below — it opens the Actions tray, which is a touch shape.
+
+           These two rules were destroyed by the tray conversion: the script that
+           removed the retired `.mobile-menu` CSS matched on substrings, and
+           `.mobile-menu-button` contains `.mobile-menu`. The button lost its
+           `display: none` and appeared on desktop. */
+        .mobile-menu-button {
+            display: none;
+            width: 40px;
+            height: 40px;
+            background-color: transparent;
+            border: none;
+            color: var(--light-text);
+            font-size: 24px;
+            cursor: pointer;
+            align-items: center;
+            justify-content: center;
+        }
+
         .modal-header {
             display: flex;
             align-items: flex-end;
@@ -1009,6 +1046,13 @@
         }
 
         @media screen and (max-width: 768px) {
+            /* Shown only here: it opens the Actions tray, which is a touch
+               shape. Restored after the tray conversion stripped it. */
+            .mobile-menu-button {
+                display: flex;
+                order: 3;
+            }
+
             :root {
                 --mobile-header-height: 70px;
             }
@@ -1340,12 +1384,11 @@
                     <span class="sheet__title">Actions</span>
                 </div>
                 <div class="sheet__body menu__body">
-                    <div class="tabs">
-                        <div class="tab active" data-content="movies" @click="menuOpen = false">
-                            Movies</div>
-                        <div class="tab" data-content="tvshows" @click="menuOpen = false">TV Shows
-                        </div>
-                    </div>
+                    <!-- No Movies / TV Shows entries here. Switching content type
+                         is a horizontal swipe on the grid, and the header tabs
+                         are hidden at this width; listing them again made the
+                         tray look like the only way to do it. The swipe is the
+                         interaction, and it already works. -->
                     <div class="sort-toggle">
                         <div class="sort-row">
                             <button class="sort-button active" data-sort="alpha"
@@ -2401,7 +2444,7 @@
                 dataUrl('backdrops', 'movies', `${item.id}.jpg`) :
                 dataUrl('backdrops', 'tvshows', `${item.id}.jpg`);
 
-            const backdropElement = document.querySelector('.modal-backdrop');
+            const backdropElement = document.querySelector('.modal-backdrop-art');
             backdropElement.innerHTML = ''; // Clear any existing content
             backdropElement.style.backgroundImage = `url(${backdropPath})`;
 
@@ -2580,7 +2623,7 @@
                     <div class="modal-section-title">Date Added</div>
                     <div id="modal-added-date">${dateAdded}</div>
                 `;
-                document.querySelector('.modal-body').appendChild(dateSection);
+                document.querySelector('.modal .modal__body').appendChild(dateSection);
             } else {
                 // Update existing date info
                 dateAddedElem.textContent = dateAdded;
