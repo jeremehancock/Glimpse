@@ -1,4 +1,4 @@
- d# 🎬 Glimpse Media Viewer
+# 🎬 Glimpse Media Viewer
 
 A sleek, responsive web application for browsing and viewing your Plex, Jellyfin, or Emby media library content. This dockerized solution fetches metadata and artwork from your media server and presents it in an elegant, user-friendly interface with support for multiple media servers.
 
