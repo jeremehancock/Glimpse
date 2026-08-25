@@ -13,6 +13,7 @@ Detail lives elsewhere — this file is only what's expensive to get wrong:
 | The Docker image, the entrypoint, the local smoke test | [docs/docker.md](docs/docker.md) |
 | Project context + the capability map | `openspec/config.yaml` |
 | The release state machine and its guardrails | `.claude/commands/ship.md` |
+| Scaffolding that must not reach a release | [docs/pre-release-cleanup.md](docs/pre-release-cleanup.md) |
 
 ## `docker-compose.yml` is frozen
 

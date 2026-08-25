@@ -6,7 +6,9 @@ finished.**
 
 This file is a snapshot, not a specification. The specs are in `openspec/`; this
 is here so the next session does not have to reconstruct the situation from git
-log. Delete it when the rewrite lands.
+log. **Delete it when the rewrite lands** — it is item 1 on
+[pre-release-cleanup.md](pre-release-cleanup.md), which lists everything else
+committed as scaffolding that must not reach a release.
 
 ---
 
