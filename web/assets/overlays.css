@@ -496,16 +496,33 @@
     }
 
     /* Slide rather than scale, matching a real tray. The panel rules above are
-       keyed on .modal__panel, so these have to win on specificity. */
-    .overlay-opening .modal--tray-on-touch .modal__panel {
+       keyed on .modal__panel, so these have to win on specificity.
+
+       NO SPACE before `.modal--tray-on-touch`. Alpine puts the transition class
+       on the overlay ROOT, which is the same element that carries the modifier —
+       `<div class="modal modal--tray-on-touch overlay-shut">`. A descendant
+       combinator therefore asks for an `.overlay-shut` ANCESTOR of the modifier,
+       which does not exist, and all three of these matched **nothing** from the
+       day they were written.
+
+       Nothing errored and nothing looked broken on a desktop, because the
+       generic `.overlay-shut .modal__panel { transform: scale(0.96) }` above is
+       a legitimate rule that then wins by default. So the detail overlay and the
+       roulette scaled like centred dialogs on a phone while every other tray
+       slid, and the symptom read as "the tray animation feels wrong" rather than
+       as a selector that never matched.
+
+       Measured: `.overlay-shut .modal--tray-on-touch .modal__panel` matched 0
+       elements; the compound form matches 1. */
+    .overlay-opening.modal--tray-on-touch .modal__panel {
         transition: transform var(--dur-slow) var(--ease-entrance);
     }
 
-    .overlay-shut .modal--tray-on-touch .modal__panel {
+    .overlay-shut.modal--tray-on-touch .modal__panel {
         transform: translateY(100%) scale(1);
     }
 
-    .overlay-shown .modal--tray-on-touch .modal__panel {
+    .overlay-shown.modal--tray-on-touch .modal__panel {
         transform: translateY(0) scale(1);
     }
 }

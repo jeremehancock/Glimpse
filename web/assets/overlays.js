@@ -162,7 +162,22 @@
                 root.classList.remove('is-overlay-open');
                 document.body.style.top = '';
                 document.body.style.paddingRight = '';
-                window.scrollTo(0, scrollY);
+                /* `behavior: 'instant'`, and it is not a nicety.
+
+                   Releasing the body from `position: fixed` puts the document
+                   back at scroll 0 for a frame. This call is what puts it back
+                   where the user was — a correction, not a journey. The page
+                   never moved as far as they are concerned, so animating it
+                   shows them a trip they did not take.
+
+                   `index.html` sets `scroll-behavior: smooth` on the document,
+                   and the two-argument `scrollTo(x, y)` obeys it. Measured
+                   closing the detail overlay 30,000px down the library: the page
+                   snapped to 0, then smoothly scrolled back over ~1.5 SECONDS,
+                   with the whole library streaming past. Reported as the tray
+                   "shooting up the screen" on close, which is exactly what it
+                   looks like — and the tray is not the thing moving. */
+                window.scrollTo({ top: scrollY, behavior: 'instant' });
             }
             locked = open;
         }

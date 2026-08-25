@@ -90,6 +90,11 @@ def overlays() -> str:
     return strip_comments(OVERLAYS_CSS.read_text())
 
 
+@pytest.fixture(scope='module')
+def overlays_js() -> str:
+    return strip_comments((WEB / 'assets' / 'overlays.js').read_text())
+
+
 # ---------------------------------------------------------------------------
 # The shared tray choice
 # ---------------------------------------------------------------------------
@@ -452,4 +457,76 @@ def test_hiding_the_handle_and_replacing_its_spacing_stay_together(overlays):
     assert any('~ .modal__head' in selector for selector in rules), (
         'the handle is hidden at one breakpoint and its spacing replaced at '
         'another; every width between shows a title too close to nothing'
+    )
+
+
+# ---------------------------------------------------------------------------
+# A tray on touch actually slides
+#
+# The modifier and the transition class land on the SAME element — Alpine puts
+# `overlay-shut` on the overlay root, which is where `modal--tray-on-touch`
+# already is. A descendant combinator between them asks for an ancestor that
+# does not exist, so the rule matches nothing, and the generic dialog rule
+# (`.overlay-shut .modal__panel { transform: scale(0.96) }`) wins by default.
+#
+# Nothing errors. On a desktop the result is correct anyway. On a phone the
+# detail overlay and the roulette scaled like centred dialogs while every other
+# tray slid up from the edge — and it reads as the animation feeling wrong,
+# never as a selector that matched zero elements.
+# ---------------------------------------------------------------------------
+
+TRANSITION_STATES = ('overlay-opening', 'overlay-shut', 'overlay-shown')
+
+
+def test_tray_on_touch_transitions_are_compound_selectors(overlays):
+    """`.overlay-shut.modal--tray-on-touch`, never `.overlay-shut .modal--…`."""
+    for state in TRANSITION_STATES:
+        assert f'.{state} .modal--tray-on-touch' not in overlays, (
+            f'`.{state} .modal--tray-on-touch` has a descendant combinator, but '
+            f'Alpine puts `{state}` on the same element the modifier is on. '
+            f'This selector matches nothing, and the dialog scale rule wins — '
+            f'the tray stops sliding and nothing reports an error.'
+        )
+        assert f'.{state}.modal--tray-on-touch .modal__panel' in overlays, (
+            f'the tray-on-touch `{state}` rule is gone; a dialog that becomes a '
+            f'tray on a phone will scale instead of sliding'
+        )
+
+
+def test_the_tray_on_touch_panel_translates_rather_than_scales(overlays):
+    """The whole point of the modifier: a tray arrives from the bottom edge."""
+    touch = re.search(r'@media \(max-width: 767px\) \{(.*?)^\}', overlays, flags=re.S | re.M)
+    assert touch, 'the touch block is gone'
+    rules = css_rules(touch.group(1), indent=4)
+
+    shut = rules.get('.overlay-shut.modal--tray-on-touch .modal__panel', '')
+    shown = rules.get('.overlay-shown.modal--tray-on-touch .modal__panel', '')
+    assert 'translateY(100%)' in shut, 'a tray-on-touch panel no longer starts off the bottom edge'
+    assert 'translateY(0)' in shown, 'a tray-on-touch panel no longer settles at the edge'
+
+
+def test_releasing_the_scroll_lock_does_not_animate_the_page(overlays_js):
+    """Restoring the scroll position is a correction, not a journey.
+
+    Releasing the body from `position: fixed` drops the document to scroll 0 for
+    a frame; this call puts it back. `index.html` sets `scroll-behavior: smooth`
+    and the two-argument `scrollTo(x, y)` obeys it, so the restore ANIMATED —
+    measured at 30,000px into the library, the page streamed back over ~1.5
+    seconds after every dismissal. It was reported as the tray shooting up the
+    screen on close, and the tray is not the thing that moves.
+    """
+    release = re.search(
+        r"root\.classList\.remove\('is-overlay-open'\);(.*?)\n            \}",
+        overlays_js,
+        flags=re.S,
+    )
+    assert release, 'the scroll-lock release block was not found'
+    body = release.group(1)
+    assert 'window.scrollTo(0,' not in body, (
+        'the release uses the two-argument scrollTo, which obeys '
+        '`scroll-behavior: smooth` and animates the restore over ~1.5s'
+    )
+    assert "behavior: 'instant'" in body, (
+        'the scroll restore no longer states an instant behavior, so it inherits '
+        "the document's smooth scrolling"
     )
