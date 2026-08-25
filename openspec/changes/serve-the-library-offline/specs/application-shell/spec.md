@@ -18,6 +18,11 @@ This is a narrow exception and its boundaries are the requirement:
   invented.
 - A client with no cached copy SHALL report the configuration as unavailable,
   exactly as today.
+- The retained copy SHALL be readable before first paint, because the theme is
+  applied from it and applying it later is a visible flash of the wrong brand.
+  This rules out the service worker's cache: the boot read is a synchronous
+  request, for which no fetch event is dispatched, so the worker never sees it.
+  The page retains its own copy for that reason and no other.
 
 The distinction matters because the failure this rule guards against is a
 misconfigured install that looks like a working one. A container that answers

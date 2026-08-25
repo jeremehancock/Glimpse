@@ -32,11 +32,27 @@ direction.
 - **WHEN** the server responds successfully
 - **THEN** that response SHALL be returned and SHALL replace the cached copy
 
-### Requirement: What the app needs to start is cached
+### Requirement: What the app needs to start is retained
 
-The service worker SHALL cache the generated configuration and the library
-snapshots as it receives them, so a client that has loaded successfully at least
-once can start again with no network.
+The client SHALL retain the generated configuration and the library snapshots as
+it receives them, so a client that has loaded successfully at least once can
+start again with no network.
+
+The two are retained by different mechanisms, and that is a constraint rather
+than a choice. The service worker holds the snapshots, which are read with
+`fetch()`. It CANNOT hold the configuration: that is read by a synchronous
+request, so the browser dispatches no fetch event for it and the worker never
+sees it — it can neither cache the response nor answer the request from a cache
+it managed to fill some other way. Everything read before first paint has to be
+read synchronously, and no worker-backed store is.
+
+So the page retains the configuration itself, in the one same-origin store that
+can be read before first paint. A specification that named the service worker as
+the mechanism for both would describe something that cannot be built.
+
+The worker SHALL NOT cache the configuration at all. An entry it can never serve
+back is live code that cannot succeed, which is the precise shape of the defect
+this change removes.
 
 Precaching the shell, the stylesheets and the vendored script is not sufficient
 and never was. Those get the app as far as reading its configuration, which is
@@ -54,11 +70,16 @@ A cached copy SHALL be written only from a successful response.
 - **THEN** the app SHALL start, read its configuration from cache, and render the
   library from the cached snapshot
 
-#### Scenario: A never-loaded client has nothing to fall back to
+#### Scenario: A client with a worker but no copy of the page it asked for
 
-- **WHEN** a client that has never successfully loaded the app opens it with the
-  network unreachable
+- **WHEN** a client whose service worker is installed requests a page it has
+  never loaded, with the network unreachable
 - **THEN** the offline fallback page SHALL be shown
+
+A client that has *never* loaded the app at all is outside what any of this can
+reach: no service worker is registered yet, so nothing exists to answer, and the
+browser's own network error page is what appears. That is not a gap to be
+closed — it is what "has to load once" means.
 
 #### Scenario: An error response is not cached
 

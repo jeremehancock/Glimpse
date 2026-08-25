@@ -112,6 +112,44 @@ it cannot reach the container at all — and a container it cannot reach is not 
 that just restarted with new settings and is waiting to be seen. When it comes
 back, it answers, and the answer wins.
 
+### 2a. The worker cannot retain the configuration — the page does
+
+*Added during implementation, after the browser said so.*
+
+The plan above assumed the service worker would cache `config.json` the way it
+caches the snapshots. It cannot. **A browser dispatches no fetch event for a
+synchronous XHR**, and the boot read is a synchronous XHR — parser-blocking,
+because the theme has to be on `<html>` before first paint or two thirds of
+users see a flash of the wrong brand on every load.
+
+Measured, not reasoned: an async `fetch('/config.json')` populates the cache and
+carries the marker header; the identical synchronous read does neither, and the
+offline start still reported "Glimpse is not configured" with the snapshots
+sitting correctly cached beside it.
+
+```
+/config.json    sync XHR   ->  worker never sees it   ->  page retains it
+/data/*.json    fetch()    ->  worker sees it         ->  worker caches it
+```
+
+Everything read before first paint must be read synchronously, and the Cache API
+is not synchronous. `localStorage` is, it is same-origin, and it survives the
+network being gone. So it holds the configuration.
+
+**Alternatives considered:**
+
+- *Boot asynchronously from the worker's cache when the sync read fails.* Keeps
+  one mechanism, but needs a warm-up fetch to populate that cache — which the
+  `application-shell` delta in this very change forbids ("SHALL NOT re-read the
+  configuration") — and reintroduces the brand flash on offline starts.
+- *Accept the flash everywhere and read asynchronously always.* Reverses a
+  documented decision from `replace-boot-time-html-rewriting` for the benefit of
+  the rarest path.
+
+Nothing about the *boundary* changes: `answered` is the try/catch boundary and
+nothing else, the retained copy is written only from a parsed 2xx body, and a
+container that says anything at all is believed. Two mechanisms, one rule.
+
 ### 3. The snapshots are cached too, or the configuration buys nothing
 
 Caching `config.json` alone produces an app that starts offline, knows which

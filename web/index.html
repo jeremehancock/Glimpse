@@ -61,25 +61,99 @@
       container. Browsers log a deprecation notice for it; that is the known
       and accepted cost. It falls back gracefully if the read fails, and the
       application-level error is raised later by loadConfig().
+
+      WHY localStorage AND NOT THE SERVICE WORKER'S CACHE. Because a browser
+      does not dispatch a fetch event for a synchronous XHR. The worker never
+      sees this request, cannot cache it and cannot answer it — measured, not
+      assumed: an async fetch() of this same URL populates the cache and this
+      call does not.
+
+      That is a hard constraint, not a preference. Everything read before first
+      paint has to be synchronous, and the Cache API is not. So the worker holds
+      the snapshots, which are read with fetch(), and the page holds the
+      configuration, which is not. One offline story, two mechanisms, because
+      one mechanism physically cannot cover both.
+
+      The boundary is unchanged and is the whole of the rule: the stored copy is
+      used ONLY when the request could not reach the container. A container that
+      answered — with any status, or with a body that will not parse — is
+      reported exactly as before. Nothing here is a default and nothing is
+      inferred; this is a copy of what this container itself said, last time it
+      said anything.
     -->
     <script>
         window.GLIMPSE = (function () {
             var SERVER_IDS = ['plex', 'jellyfin', 'emby'];
+            // Versioned, so a future change to what is stored cannot be handed a
+            // document written by an older build and read as the current shape.
+            var RETAINED_CONFIG_KEY = 'glimpse.config.v1';
             var config = null;
+            var fromCache = false;
+
+            // Wrapped because localStorage throws rather than returning null
+            // when storage is disabled or the quota is gone. A browser with no
+            // storage available must degrade to today's behaviour — report when
+            // the container is unreachable — not fail at boot.
+            function remember(text) {
+                try {
+                    window.localStorage.setItem(RETAINED_CONFIG_KEY, text);
+                } catch (error) {
+                    /* no retention available; nothing else changes */
+                }
+            }
+
+            function recall() {
+                try {
+                    return JSON.parse(window.localStorage.getItem(RETAINED_CONFIG_KEY));
+                } catch (error) {
+                    return null;
+                }
+            }
+
+            // Did the container SAY anything? This is the distinction the whole
+            // offline story rests on, and it is exactly the try/catch boundary:
+            // send() throws when the request could not be delivered, and returns
+            // — with a status — whenever the container answered.
+            var answered = false;
+            var body = null;
 
             try {
                 var request = new XMLHttpRequest();
                 // Synchronous on purpose. See the comment above.
                 request.open('GET', '/config.json', false);
                 request.send(null);
+                answered = true;
                 if (request.status >= 200 && request.status < 300) {
-                    config = JSON.parse(request.responseText);
+                    body = request.responseText;
                 }
             } catch (error) {
-                // Swallowed here only so the page still renders enough chrome to
-                // show the error. loadConfig() reports it properly.
-                config = null;
+                // Unreachable. NOT swallowed as "no config" any more — that is
+                // the one case a retained copy is allowed to answer.
+                answered = false;
             }
+
+            if (body !== null) {
+                try {
+                    config = JSON.parse(body);
+                } catch (error) {
+                    // Valid HTTP, invalid JSON. The container answered, so this
+                    // is reported and the retained copy stays out of it — the
+                    // stored document is deliberately NOT cleared, because a
+                    // container that is broken today is still the one this
+                    // client will be opened away from tomorrow.
+                    config = null;
+                }
+                if (config) {
+                    remember(body);
+                }
+            } else if (!answered) {
+                config = recall();
+                fromCache = config !== null;
+            }
+            // The remaining case — answered, but not with a 2xx — leaves config
+            // null and never consults the retained copy. A container whose
+            // entrypoint failed is present and broken, and the user has to see
+            // that rather than the last configuration that worked.
 
             // First path segment, when it names a server.
             var segment = (window.location.pathname.split('/')[1] || '').toLowerCase();
@@ -105,7 +179,12 @@
             // every stylesheet rule that reads the token.
             document.documentElement.setAttribute('data-server', active);
 
-            return { config: config, activeServer: active, serverIds: SERVER_IDS };
+            return {
+                config: config,
+                configFromCache: fromCache,
+                activeServer: active,
+                serverIds: SERVER_IDS
+            };
         })();
     </script>
 
@@ -274,6 +353,45 @@
             font-size: 1.8rem;
             color: var(--primary-color);
             margin-right: 8px;
+        }
+
+        /* The offline indicator.
+         *
+         * Deliberately NOT in the server's brand colour. Every other accent in
+         * this header means "Glimpse, working"; this one means the opposite, and
+         * painting it with --primary-color would make the one state the user
+         * needs to notice the same colour as the six that are fine. Amber is
+         * fixed across all three themes for that reason.
+         *
+         * Shown and hidden with the `hidden` attribute rather than a class, so
+         * the default is off and a control that forgets to hide it is a visible
+         * bug rather than a silent one. `display` has to be declared here
+         * because a flex item ignores `hidden` otherwise. */
+        .offline-badge {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin: 0;
+            padding: 3px 10px;
+            border: 1px solid rgba(217, 164, 65, 0.4);
+            border-radius: var(--radius-pill);
+            background-color: rgba(217, 164, 65, 0.12);
+            color: #d9a441;
+            font-size: 0.78rem;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .offline-badge[hidden] {
+            display: none;
+        }
+
+        .offline-badge__dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background-color: #d9a441;
+            flex: 0 0 auto;
         }
 
         /* Tabs with pill styling */
@@ -1299,6 +1417,20 @@
                 order: 1;
             }
 
+            /* The header is one 70px row here, shared with the search box and
+               the hamburger, so the badge keeps the word and drops the
+               explanation. It is still text — role="status" announces whatever
+               is displayed, so this shortens the announcement rather than
+               removing it, and the state is never left to the colour alone. */
+            .offline-badge {
+                padding: 2px 8px;
+                font-size: 0.7rem;
+            }
+
+            .offline-badge__detail {
+                display: none;
+            }
+
             h1 {
                 font-size: 1.3rem;
             }
@@ -1562,6 +1694,24 @@
         <div class="header-content">
             <div class="logo-section">
                 <h1><span class="logo-icon"><img src="images/logo.png" /></span>Glimpse</h1>
+                <!-- Offline indicator.
+                     In the header rather than as a dismissible notice, and that
+                     is the point: a dismissible notice about stale data is one
+                     that gets dismissed and then forgotten, leaving the user
+                     back where they started — unable to tell a stale grid from
+                     a current one, and reading a missing recent addition as the
+                     fetcher being broken.
+
+                     role="status" so it is announced when it appears, and it
+                     carries words rather than only a colour, because a dot on
+                     its own says nothing to a screen reader and nothing at all
+                     to a user who cannot distinguish it. The dot is decoration
+                     on top of the text, never instead of it. -->
+                <p class="offline-badge" id="offline-badge" role="status" hidden>
+                    <span class="offline-badge__dot" aria-hidden="true"></span>
+                    <span class="offline-badge__text">Offline<span
+                            class="offline-badge__detail"> — showing saved library</span></span>
+                </p>
             </div>
             <div class="search-box">
                 <div class="search-container">
@@ -2511,8 +2661,53 @@
             searchInput.focus();
         });
 
+        /* ---------------- Serving from cache, and saying so ----------------
+         *
+         * The service worker answers /config.json and the snapshots from the
+         * last copy it received when — and only when — the container could not
+         * be reached at all. It marks those responses with X-Glimpse-From-Cache.
+         *
+         * Reading that header is the only way the app can tell; a cached
+         * response is otherwise indistinguishable from a live one. And it has
+         * to tell, because a library that is quietly out of date is the same
+         * class of failure as one that is quietly wrong: the user cannot see
+         * the difference, and reads a film they added last night being missing
+         * as the fetcher being broken rather than as being on a train.
+         */
+        const FROM_CACHE_HEADER = 'X-Glimpse-From-Cache';
+        const offlineBadge = document.getElementById('offline-badge');
+
+        function servedFromCache(response) {
+            return response.headers.get(FROM_CACHE_HEADER) === '1';
+        }
+
+        /* Report the CURRENT state, not a flag set once at boot. Called with the
+           answer every time the app asks the container for something, so
+           reaching the server again clears it without a second code path. */
+        function setOfflineIndicator(isStale) {
+            offlineBadge.hidden = !isStale;
+        }
+
+        // The boot read of config.json happens before this script runs, in the
+        // parser-blocking block at the top of the file. This is where its result
+        // becomes visible.
+        setOfflineIndicator(Boolean(window.GLIMPSE.configFromCache));
+
+        /* Reaching the container again does not, on its own, make what is on
+           screen live — the grid is still the snapshot that was loaded offline.
+           So the network coming back reloads the data rather than only clearing
+           the badge, and the badge is then set from what actually arrived. A
+           badge cleared without a reload would be telling the truth about the
+           connection and a lie about the library.
+
+           The search term is carried across because this fires while the user is
+           looking at the page, not at startup. */
+        window.addEventListener('online', () => {
+            loadMedia({ searchTerm: searchInput.value.toLowerCase() });
+        });
+
         // Load and display media data
-        async function loadMedia() {
+        async function loadMedia({ searchTerm = '' } = {}) {
             try {
                 // Load movies
                 const moviesResponse = await fetch(dataUrl('movies.json'));
@@ -2522,6 +2717,13 @@
                 const tvShowsResponse = await fetch(dataUrl('tvshows.json'));
                 tvShowsData = await tvShowsResponse.json();
 
+                // Either snapshot coming from cache means the container was not
+                // reachable; both coming from the network means it was, whatever
+                // the boot read of config.json found.
+                setOfflineIndicator(
+                    servedFromCache(moviesResponse) || servedFromCache(tvShowsResponse)
+                );
+
                 // Extract genres
                 allGenres.movies = extractGenres(moviesData, 'movies');
                 allGenres.tvshows = extractGenres(tvShowsData, 'tvshows');
@@ -2530,13 +2732,28 @@
                 updateGenreUI('movies');
 
                 // Initial sort and display
-                filterAndSortMedia('');
+                filterAndSortMedia(searchTerm);
             } catch (error) {
                 console.error('Error loading media data:', error);
-                document.querySelector('#movies-content .loading').innerHTML =
-                    '<div class="error">Failed to load movie data. Please try again later.</div>';
-                document.querySelector('#tvshows-content .loading').innerHTML =
-                    '<div class="error">Failed to load TV show data. Please try again later.</div>';
+
+                /* Both `.loading` placeholders are gone once a grid has
+                   rendered, so these lookups return null on the reload that the
+                   `online` handler fires. Only the FIRST load has anywhere to
+                   put this message; a failed reload leaves the snapshot that is
+                   already on screen, with the offline badge still saying what it
+                   is. That is the better outcome — replacing a rendered library
+                   with an error because a refresh failed would be worse than the
+                   staleness it was trying to fix. */
+                const moviesLoading = document.querySelector('#movies-content .loading');
+                const tvShowsLoading = document.querySelector('#tvshows-content .loading');
+                if (moviesLoading) {
+                    moviesLoading.innerHTML =
+                        '<div class="error">Failed to load movie data. Please try again later.</div>';
+                }
+                if (tvShowsLoading) {
+                    tvShowsLoading.innerHTML =
+                        '<div class="error">Failed to load TV show data. Please try again later.</div>';
+                }
             }
         }
 

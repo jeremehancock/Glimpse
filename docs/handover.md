@@ -22,30 +22,40 @@ log. Delete it when the rewrite lands.
 | `2aa387d` | **`convert-overlays-to-trays`** — six overlays onto one system |
 | `c2c2b2e` | Five regressions from the tray conversion |
 
-`make check` is green (142 tests). CI is green on `dev`.
+`make check` is green (157 tests). CI is green on `dev`.
 
-> **As of 2026-08-25 a full session of work sits UNCOMMITTED in the working
-> tree.** `/ship` has not been run. Two further changes were applied —
+> **As of 2026-08-25, every change in flight is code-complete and the only task
+> left in each is ":dev validation".** `serve-the-library-offline` was applied
+> that evening and is committed with this note; the two before it —
 > `fix-overlay-layering-and-dead-tray-controls` (44/45) and
-> `restyle-tray-controls` (37/38), each with only ":dev validation" left — and a
-> third, `serve-the-library-offline`, is drafted but not applied. Modified:
-> `CLAUDE.md`, `README.md`, `config/nginx.conf`, `docs/docker.md`, this file,
-> `web/index.html`, `web/sw.js`, and all three files under `web/assets/`. New:
-> `tests/test_overlay_layering.py`, `tests/test_tray_presentation.py`.
+> `restyle-tray-controls` (37/38) — were committed earlier the same day.
+> Nothing has been archived, because archiving rewrites `openspec/specs/` and
+> the user has not yet validated an image.
 > The six-item punch list at the end of this file is what the user wants
-> finished before any of it reaches `main`.
+> finished before any of it reaches `main`; item 4 is now done.
 >
 > **`make lint` needs Node 18+.** The shell default here is v16.20.1, which fails
 > ESLint 9 with a `structuredClone is not defined` *config* error — not a lint
 > error, so it is easy to misread. Use
 > `export PATH="$HOME/.nvm/versions/node/v18.20.8/bin:$PATH"`.
 
-### Three OpenSpec changes are implemented but NOT archived
+### Six OpenSpec changes are implemented but NOT archived
 
 ```bash
 openspec list
 ```
 
+Every one of them is code-complete. The outstanding task in each is the same
+task: validate the `:dev` image. Nothing may be archived until that happens,
+because archiving rewrites `openspec/specs/` — which is still empty, since no
+change in this repo has ever been archived.
+
+- **`serve-the-library-offline`** — 37/38. Only "validate `:dev`" remains, and
+  for this one that validation must be done **offline**, which is the one thing
+  that cannot be checked by looking at the app on a working network. See item 4
+  of the punch list.
+- **`fix-overlay-layering-and-dead-tray-controls`** — 44/45.
+- **`restyle-tray-controls`** — 37/38.
 - **`replace-boot-time-html-rewriting`** — 50/51. Only "validate `:dev`" remains.
 - **`convert-overlays-to-trays`** — 42/44. Reduced motion and real touch/swipe
   feel still need a physical device.
@@ -296,13 +306,32 @@ the glyph, so half-leading counts:
 `line-height` override — precisely the edit `overlays.css` warns "is the edit
 most likely to undo this quietly".
 
-### 4. Verify the PWA caches properly
+### 4. Verify the PWA caches properly — **DONE, pending `:dev`**
 
-Asset freshness was fixed (see the caching table in [CLAUDE.md](../CLAUDE.md)).
-What remains is that **the app has never worked offline**: `config.json` and the
-library snapshots use a cache fallback that nothing ever populates, so with no
-network the app shows "Glimpse is not configured". Fully drafted and not applied:
-`openspec/changes/serve-the-library-offline/`.
+Asset freshness was fixed earlier (see the caching table in
+[CLAUDE.md](../CLAUDE.md)). `serve-the-library-offline` then closed the rest: the
+app had never worked offline at all, because `config.json` and the snapshots used
+a cache fallback nothing ever populated. Verified 30/30 in a real browser at
+1280px and 390px against a container seeded with 400 movies and 250 shows, by
+**stopping the container** rather than emulating a network condition — a stopped
+container is a genuine `fetch()` throw, which is the case the whole change turns
+on.
+
+**The trap it uncovered, and the reason to read this before touching `sw.js`:**
+a browser dispatches **no fetch event for a synchronous XHR**, and the boot read
+of `config.json` is one, because the theme must be on `<html>` before first
+paint. The service worker therefore cannot cache that request or answer it. So
+the snapshots live in the worker's cache and the configuration is retained by the
+page in `localStorage` — two mechanisms, because no single one covers both.
+
+This is invisible on every online load. The first implementation cached the
+snapshots correctly, passed lint, passed 154 tests, and *still* showed "Glimpse
+is not configured" with the network gone. Only a real browser with the container
+stopped found it. Do not "simplify" the two mechanisms back into one.
+
+Also observed and left alone as out of scope: the container's nginx declares
+`error_page 500 502 503 504 /50x.html` but ships no `50x.html`, so every 5xx is
+rewritten to a 404.
 
 ### 5. Animate the movies/TV swipe
 
