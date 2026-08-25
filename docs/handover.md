@@ -12,7 +12,7 @@ log. Delete it when the rewrite lands.
 
 ## Where things stand
 
-`dev` is six commits ahead of `main`:
+`dev` is eight commits ahead of `main`:
 
 | Commit | What |
 | --- | --- |
@@ -21,18 +21,27 @@ log. Delete it when the rewrite lands.
 | `2633530` | README title fix |
 | `2aa387d` | **`convert-overlays-to-trays`** — six overlays onto one system |
 | `c2c2b2e` | Five regressions from the tray conversion |
+| `b31068c` | **`pin-detail-header-and-fix-actions-tray`** |
+| `e1d130b` | **`fix-overlay-layering-…`** + **`restyle-tray-controls`** |
+| `b27d7c2` | `serve-the-library-offline` — **superseded by the next commit** |
+| `fcdcb58` | **`cache-for-speed-not-for-offline`** — withdrew the offline capability |
 
-`make check` is green (157 tests). CI is green on `dev`.
+`make check` is green (152 tests). CI is green on `dev`. `:dev` on Docker Hub was
+built by hand from `fcdcb58`, **amd64 only**.
 
-> **As of 2026-08-25, every change in flight is code-complete and the only task
-> left in each is ":dev validation".** `cache-for-speed-not-for-offline` was
-> applied that evening and is committed with this note; the two before it —
-> `fix-overlay-layering-and-dead-tray-controls` (44/45) and
-> `restyle-tray-controls` (37/38) — were committed earlier the same day.
-> Nothing has been archived, because archiving rewrites `openspec/specs/` and
-> the user has not yet validated an image.
-> The six-item punch list at the end of this file is what the user wants
-> finished before any of it reaches `main`; item 4 is now done.
+> **Every change in flight is code-complete.** The only unchecked task in each is
+> ":dev validation". Nothing has been archived, because archiving rewrites
+> `openspec/specs/` — still empty, since nothing here has ever been archived.
+>
+> **`:dev` validation is PARTIAL.** As of 2026-08-25 the user has confirmed the
+> desktop genre control (punch-list item 1) and driven the caching work to a
+> conclusion. They have **not** signed off the tray conversion, the layering
+> fixes, or the detail overlay. Do not read "code-complete" as "validated", and
+> do not archive on the strength of item 1.
+>
+> **Next up, in this order, set by the user:** punch-list **item 3** (tray
+> handle-to-title gap), then **item 2** (choppy trays). Both have measurements
+> waiting in the punch list at the end of this file — read them first.
 >
 > **`make lint` needs Node 18+.** The shell default here is v16.20.1, which fails
 > ESLint 9 with a `structuredClone is not defined` *config* error — not a lint
@@ -109,20 +118,24 @@ a separate phone drawer, is now one implementation.
 
 ## What is left
 
-1. **Hear out the user's remaining issues** with
+1. **Punch-list item 3, then item 2** — the order the user set on 2026-08-25.
+   See the punch list at the end of this file; both have measurements already.
+2. **Hear out the user's remaining issues** with
    `pin-detail-header-and-fix-actions-tray` — see above. They exist and have not
-   been described.
-2. **Validate `:dev`** — the gate on everything else. See "Building `:dev`".
-3. **Split `web/index.html` into ES modules.** The planned change, not yet
+   been described. This may overlap with item 3.
+3. **Finish validating `:dev`** — the gate on archiving. Partially done: the
+   user has confirmed the desktop genre control and driven the caching change.
+   See "Building `:dev`".
+4. **Split `web/index.html` into ES modules.** The planned change, not yet
    proposed. `index.html` is still ~4,000 lines and carries a temporary config
    adapter, marked in-file with the change name that should remove it.
-4. **Regenerate the screenshots in `assets/`.** All six predate the rewrite —
+5. **Regenerate the screenshots in `assets/`.** All six predate the rewrite —
    `screenshot-details-*` in particular show the detail view as a centred box
    with a corner close button, which is the presentation the tray conversion
    replaced. They are served from `main`, so they will not look wrong to anyone
    until the rewrite merges, and then all six will at once. This needs a real
    media library, so it is a release-time task rather than a per-change one.
-5. **Then** archive all six changes, bump `VERSION` past `1.3.0`, and reopen
+6. **Then** archive all six changes, bump `VERSION` past `1.3.0`, and reopen
    the `main` bootstrap (below).
 
 ---
@@ -188,6 +201,18 @@ chromium --headless --disable-gpu --no-sandbox \
 `--remote-allow-origins='*'` is required or the handshake 403s. Then
 `Emulation.setDeviceMetricsOverride` for the viewport and `Runtime.evaluate` to
 click and assert.
+
+**Do not measure caching with `PerformanceResourceTiming.transferSize`.** It
+reads `0` for anything a service worker handled, whether the worker went to the
+network or not — so "served from cache" and "fetched through the worker" look
+identical. That reported the library snapshots as cache hits when they were not.
+Read the container's own access log instead:
+
+```bash
+docker exec <container> tail -n +<N> /var/log/nginx/access.log
+```
+
+It is the only witness that cannot be fooled by the timing API.
 
 **Test at 1280px *and* 390px.** The overlay system behaves differently at each by
 design, so one width proves nothing:
@@ -257,53 +282,98 @@ Most are already in [CLAUDE.md](../CLAUDE.md); these are the ones that cost time
 ## Punch list before `main` — stated 2026-08-25
 
 After reviewing the restyled trays ("this looks a lot better"), the user listed
-six things to get right before anything reaches `main`. Several were measured in
-that session, and the findings change what the work is — read these before
-assuming any item is unstarted.
+six things to get right before anything reaches `main`. Several have since been
+measured or closed — read each entry before assuming it is unstarted.
 
-### 1. The desktop genre control should not be a tray
+**Work order for the next session, set by the user on 2026-08-25:**
 
-**It already isn't.** Verified at 1280px against a container built from `dev`:
-the genre overlay is a centred dialog — `align-items: center`, grab handle
-hidden, close button shown. Either a stale build is being viewed (this exact
-report was traced to a stale service-worker cache once already) or the ask is for
-a **dropdown anchored to its button**.
+| Order | Item | State |
+| --- | --- | --- |
+| **1st** | 3 — tray handle-to-title gap | measured, not fixed |
+| **2nd** | 2 — choppy trays | two leads, not reproduced |
+| then | 5 — movies/TV swipe animation | not started |
+| — | 1 — desktop genre control | **CLOSED, confirmed by the user** |
+| — | 4 — PWA caching | **DONE**, pending `:dev` sign-off |
+| — | 6 — CI/CD publishes | **answered**; needs the `main` bootstrap |
 
-Confirm which before building. An anchored dropdown reverses open question 3
-above, answered "no — one overlay at both widths". That is a product decision,
-not a bug fix.
+### 1. The desktop genre control should not be a tray — **CLOSED**
+
+**Confirmed fixed by the user on 2026-08-25**, against the `:dev` image built
+from `fcdcb58`. It presents as a centred dialog at pointer widths: `.sheet` gets
+`align-items: center` above 768px, the grip is hidden and the × is shown.
+
+Worth knowing why this took two rounds: the behavior was already correct in the
+source, and the earlier report was a **stale service-worker cache** serving old
+CSS against new markup — the same failure recorded in "Traps worth knowing". If
+a fix ever appears not to have landed, compare the served bytes against the repo
+*before* touching the code.
+
+The anchored-dropdown option was never needed. Open question 3 stands answered:
+one overlay at both widths.
 
 ### 2. Mobile trays are choppy and don't look like they rise from the bottom
+
+**Not addressed. No code has changed, and it has not been reproduced.**
 
 The durations are **not** the difference: Glimpse 200/280/150ms against Marquee
 180/300/120ms (`--dur-base` / `--dur-slow` / `--dur-exit`). The open genuinely
 animates `translateY(285px) → 0`. Two leads:
 
 - **The likely one.** `web/index.html` renders *every* item as a DOM node
-  (`mediaData.forEach`, ~line 2401); only the images lazy-load. A real library is
-  ~7,000 items. The scroll lock sets `position: fixed` on `<body>` on the same
-  frame the tray starts moving, forcing a full relayout of every card at frame 1.
-  Marquee's wall is paginated, so its document is far smaller. **A few-hundred
-  item fixture will never reproduce this — seed thousands.**
+  (`mediaData.forEach`, ~line 2551); only the images lazy-load via
+  IntersectionObserver. The user's library is ~7,086 items. The scroll lock sets
+  `position: fixed` on `<body>` on the same frame the tray starts moving, forcing
+  a full relayout of every card at frame 1. Marquee's wall is paginated, so its
+  document is a fraction of the size.
+
+  **A few-hundred-item fixture will never reproduce this.** The
+  `cache-for-speed-not-for-offline` session drove a real browser against a
+  **400-item** library and saw nothing wrong — that is not evidence of health.
+  **Seed thousands** before concluding anything.
+
 - Alpine strips `overlay-opening` at ~275ms while the panel is still ~8px from
   rest, handing the remainder to `.sheet__panel`'s base 200ms transition — an
   easing discontinuity at the end of every open. On close the panel reaches 236px
-  down while the root is still at 0.61 opacity, so the panel outruns its backdrop.
+  down while the root is still at 0.61 opacity, so the panel outruns its own
+  backdrop.
+
+Measure before changing anything, and measure on a real browser — see "Testing
+the frontend" above.
 
 ### 3. Every tray needs the same handle-to-title gap
 
-A measured defect — three different distances to the glyph. The eye measures to
-the glyph, so half-leading counts:
+**Measured, not fixed. Start here.** Confirmed against `fcdcb58`.
 
-| Overlay | head padding-top | line-height | gap to glyph |
-| --- | --- | --- | --- |
-| Genre / Server / Actions | 14px | 26.4px | 18.4px |
-| Detail | 16px | **19.36px** (override) | 16.9px |
-| Roulette | 16px | 26.4px | 20.4px |
+Half of the original defect is already gone: the `line-height` override on the
+overlay head's title was removed by `restyle-tray-controls`, and
+`web/assets/overlays.css` now carries a comment explaining why line-height must
+stay inherited. **Do not reintroduce one** — it changes nothing about the padding
+anyone would think to check.
 
-`.sheet__head` pads 14px and `.modal__head` 16px, and `.modal-title` carries a
-`line-height` override — precisely the edit `overlays.css` warns "is the edit
-most likely to undo this quietly".
+What remains is plain padding, and it disagrees at **both** widths, in opposite
+directions:
+
+| | `<768px` (tray) | `≥768px` (dialog) |
+| --- | --- | --- |
+| `.sheet__head` — genre, server, Actions | **14px** | **18px** |
+| `.modal__head` — roulette | **16px** | **16px** |
+
+Both sit under the same `.sheet__grip` (`padding: 12px 0 0`) and both title
+elements are `1.1rem` with inherited line-height, so the padding is the whole of
+the difference. The desktop override lives in the `min-width: 768px` block and
+exists because the grip is hidden there — the title needs the dialog's own top
+padding instead. Whatever it becomes, it has to stay deliberate for that reason.
+
+**The detail overlay is a different problem and should be judged separately.** It
+has no `__head` at all: `.modal__fixed` holds the grip, the artwork, the poster
+and `.modal-title` (the *item's* title, `2.2em` / `line-height: 1.1`, line-clamped
+to 3), with `.modal-header` padding `30px`. So "the gap below the handle" there is
+grip → item title across a different box. Making it numerically match the other
+five may not be what looks right; decide with your eyes on a phone, not with a
+calculator.
+
+The eye measures to the **glyph**, so half-leading counts. Measure rendered
+positions in a real browser rather than adding up the CSS.
 
 ### 4. Verify the PWA caches properly — **DONE, pending `:dev`**
 
@@ -342,7 +412,10 @@ a cache. It would matter to anyone who reintroduces offline support.
 Not started. The outgoing grid sliding out as the new one arrives. Both grids
 already exist as `#movies-content` and `#tvshows-content`, so a transform-based
 slide is plausible — but see the DOM size note in item 2 before animating a
-container holding thousands of nodes.
+container holding thousands of nodes. **Item 2 and item 5 are probably the same
+underlying problem**: if a full relayout of ~7,000 cards is what makes a tray
+choppy, it will make a grid slide choppy too. Doing item 2 first may resolve
+this one, or at least tell you what it costs.
 
 ### 6. Confirm CI/CD builds `:dev` and `:latest`
 
