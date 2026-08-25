@@ -577,18 +577,78 @@
             text-overflow: ellipsis;
         }
 
-        /* Content area styling */
+        /* Content area styling.
+
+           This rule used to also declare `opacity: 0`, `transform:
+           translateY(10px)` and a transition between them, with `.content.active`
+           setting the end state. None of it had ever run: a `display: none` to
+           `display: block` swap does not transition, so the tabs cut instantly
+           while the stylesheet described a fade. It is gone rather than fixed in
+           place — the tab transition below is a horizontal slide, and a rule that
+           appears to animate the tabs and does not is where the next live one
+           hides. */
         .content {
             display: none;
-            opacity: 0;
-            transform: translateY(10px);
-            transition: opacity var(--transition-speed), transform var(--transition-speed);
         }
 
         .content.active {
             display: block;
-            opacity: 1;
-            transform: translateY(0);
+        }
+
+        /* --- The tab transition -------------------------------------------
+           Both tabs scroll as one document, so two grids on screen at once
+           share one scrollY and the incoming tab cannot show its top while the
+           outgoing one shows where the viewer was. `.tab-leaving` takes the
+           outgoing tab out of the scroller: pinned and offset by the scroll
+           position it renders exactly where it already was, but no longer
+           responds to scrolling, so the page can be set to 0 underneath it
+           without the viewer seeing a jump.
+
+           Both tabs must be displayed for the duration, and only one of them
+           carries `.active` — so these force display themselves rather than
+           relying on it.
+
+           TRANSLATE ON THE HORIZONTAL AXIS ONLY. `firstVisibleRow()` derives
+           the grid's window from `getBoundingClientRect().top`, so a translateY
+           or a scale moves the row arithmetic while the transition runs and a
+           scroll mid-flight re-windows the grid against a position the viewer
+           never occupied. It presents as an off-by-one in the window, not as a
+           layout bug. `--tab-shift` is an X offset and there is no Y equivalent
+           on purpose. */
+        /* `will-change` is declared on the frozen/parked state rather than on
+           `.tab-sliding`, so the compositing layer is promoted during the setup
+           frame instead of on the transform's first frame. Declaring it
+           alongside the transform costs the promotion exactly where the
+           animation can least afford it — measured at 83ms of a 280ms slide. */
+        .content.tab-leaving {
+            display: block;
+            position: fixed;
+            left: 0;
+            right: 0;
+            /* `top` is set inline to the captured scroll offset. */
+            transform: translateX(var(--tab-shift, 0));
+            will-change: transform;
+        }
+
+        .content.tab-entering {
+            display: block;
+            transform: translateX(var(--tab-shift, 0));
+            will-change: transform;
+        }
+
+        .content.tab-sliding {
+            transition: transform var(--dur-tab) var(--ease-standard);
+        }
+
+        /* An incoming tab parked at translateX(100%) sits a full viewport past
+           the right edge. Measured at 390px: scrollWidth reaches 750px against a
+           390px clientWidth, so this is a real scrollbar and not a precaution.
+           Scoped to the transition's duration — the class is removed by the same
+           teardown that clears the transforms, so containment cannot outlive the
+           animation that needs it. */
+        .tab-transitioning,
+        .tab-transitioning body {
+            overflow-x: hidden;
         }
 
         /* `overflow-anchor: none` is a guard, and its status is worth being
@@ -2216,25 +2276,58 @@
             return overlayScope()[name] === true;
         }
 
-        // Function to switch tabs - UPDATED TO MAINTAIN GENRE FILTER
-        function switchTab(contentName) {
-            // Get current search query before switching tabs
+        /* ------------------------------------------------------------------
+           Switching tabs
+
+           Two paths, one set of state changes. The pointer path swaps
+           instantly; the touch path slides the outgoing grid away in the
+           direction of the swipe. Both drive `applyTabState()`, so a change to
+           what a tab switch *means* cannot land in one and miss the other.
+
+           The animated path exists because both tabs scroll as one document:
+           they are siblings in `.container`, so two grids on screen at once
+           necessarily share one `scrollY`, and the incoming tab has to show its
+           top while the outgoing shows wherever the viewer was. The resolution
+           is to take the outgoing tab out of the scroller — pinned with
+           `position: fixed` and offset by the scroll position, it renders
+           pixel-identical to where it already was but no longer responds to
+           scrolling. The page is then set to 0 in the one frame nothing on
+           screen reflects it. See `openspec/specs/media-browsing/spec.md`.
+
+           MEASURED, 7,000 movies / 1,200 shows at 390x844, real Chromium over
+           CDP. What the opening frame of the slide cost as each cause was
+           removed — every frame AFTER the first was a clean 16.7ms throughout,
+           so the slide was never slow; it was over before it was visible:
+
+             | opening frame | cause removed                          |
+             | 183.4ms       | (none — one rAF, fade on, no promotion)|
+             |  83.3ms       | second rAF: render paints first        |
+             |  16.7-33.4ms  | no card fade + will-change on setup    |
+
+           Two things this rules OUT, so they are not re-investigated:
+
+             - The transform is not the cost. A translateX on a box 1,228,722px
+               tall holds 59.9fps with zero dropped frames, and bounding it to
+               100vh changes nothing — measured both ways.
+             - Neither is the first switch's double render. The ~120ms between
+               the gesture and the slide is flat across the first, second and
+               third switch. It is the per-switch filter, sort and render of the
+               library, which the instant path has always paid too.
+
+           Re-measure with `tools/grid_metrics.py` and a library seeded to
+           thousands. A few-hundred-item fixture cannot fail any of this.
+           ------------------------------------------------------------------ */
+
+        /* Everything a tab switch changes that is not the visual swap. Both
+           paths call this, and it never touches `.content` — which of the two
+           containers is displayed is the one thing the paths do differently. */
+        function applyTabState(contentName) {
             const currentSearchTerm = document.querySelector('.search-input').value.toLowerCase();
 
             // Update active tab (both mobile and desktop)
             document.querySelectorAll('.tab').forEach(t => {
-                if (t.dataset.content === contentName) {
-                    t.classList.add('active');
-                } else {
-                    t.classList.remove('active');
-                }
+                t.classList.toggle('active', t.dataset.content === contentName);
             });
-
-            // Update active content
-            document.querySelectorAll('.content').forEach(content => {
-                content.classList.remove('active');
-            });
-            document.getElementById(contentName + '-content').classList.add('active');
 
             // Check if the current genre exists in the new tab's genres
             if (currentGenre !== 'all' && !allGenres[contentName][currentGenre]) {
@@ -2249,17 +2342,206 @@
             // Update the genre drawer and dropdown for the new tab
             updateGenreUI(contentName);
 
-            // Apply the current search and sort to the newly selected tab content
-            filterAndSortMedia(currentSearchTerm);
-
             // Close the Actions tray if it is open
             setOverlay('menuOpen', false);
 
+            return currentSearchTerm;
+        }
+
+        // Function to switch tabs - UPDATED TO MAINTAIN GENRE FILTER
+        function switchTab(contentName, direction) {
+            const outgoing = document.querySelector('.content.active');
+            const incoming = document.getElementById(contentName + '-content');
+
+            // Nothing to switch to, and nothing to animate between.
+            if (!incoming || outgoing === incoming) {
+                const searchTerm = applyTabState(contentName);
+                filterAndSortMedia(searchTerm, contentName);
+                window.GlimpseOverlays.scrollPageTo(0);
+                return;
+            }
+
+            if (shouldAnimateTabs() && direction) {
+                switchTabAnimated(contentName, outgoing, incoming, direction);
+                return;
+            }
+
+            const searchTerm = applyTabState(contentName);
+
+            // Update active content
+            document.querySelectorAll('.content').forEach(content => {
+                content.classList.remove('active');
+            });
+            incoming.classList.add('active');
+
+            // Apply the current search and sort to the newly selected tab content
+            filterAndSortMedia(searchTerm, contentName);
+
             /* Scroll to top when switching tabs. Routed through the overlay
-               system because the line above admits an overlay may be open, and
-               a direct scroll would be discarded in exactly that case. With
+               system because `applyTabState()` admits an overlay may be open,
+               and a direct scroll would be discarded in exactly that case. With
                nothing open this behaves identically. */
             window.GlimpseOverlays.scrollPageTo(0);
+        }
+
+        /* The animated path is enabled by the same `isMobile` the swipe
+           listeners are bound behind, and by nothing else.
+
+           Deliberately not a media query. Two conditions describing one
+           capability drift: the rule hiding a page control and the rule showing
+           the overlay trigger that replaced it were written as separate media
+           queries here once, reached 992px and 768px independently, and left
+           every width between them with neither. One condition cannot drift
+           from itself, so there is no width where the gesture fires and the
+           animation does not.
+
+           `isMobile` is declared further down, in the swipe block — it is the
+           gesture's flag, borrowed, which is the whole point. This is a
+           function rather than a constant for that reason: it is called at
+           swipe time, long after both have been evaluated. */
+        function shouldAnimateTabs() {
+            return typeof isMobile !== 'undefined' && isMobile;
+        }
+
+        /* Read from `--dur-tab` rather than restated here, so the stylesheet
+           stays the single source for the number. Only the safety teardown uses
+           it; the transition itself is timed by CSS. */
+        const TAB_TRANSITION_MS = (() => {
+            const raw = getComputedStyle(document.documentElement)
+                .getPropertyValue('--dur-tab').trim();
+            const ms = raw.endsWith('ms') ? parseFloat(raw)
+                : raw.endsWith('s') ? parseFloat(raw) * 1000
+                : NaN;
+            return Number.isFinite(ms) ? ms : 280;
+        })();
+
+        /* Set by the animated path so its teardown can be run again by whatever
+           interrupts it. An animation is presentation; the tab state it leaves
+           behind is correctness, and that must not depend on a `transitionend`
+           arriving. */
+        let tabTransition = null;
+
+        function endTabTransition() {
+            if (!tabTransition) return;
+            const { outgoing, incoming, onEnd, timer } = tabTransition;
+            tabTransition = null;
+
+            clearTimeout(timer);
+            incoming.removeEventListener('transitionend', onEnd);
+
+            outgoing.classList.remove('tab-leaving', 'tab-sliding');
+            incoming.classList.remove('tab-entering', 'tab-sliding');
+            outgoing.style.removeProperty('--tab-shift');
+            incoming.style.removeProperty('--tab-shift');
+            outgoing.style.removeProperty('top');
+            document.documentElement.classList.remove('tab-transitioning');
+        }
+
+        function switchTabAnimated(contentName, outgoing, incoming, direction) {
+            // A second swipe mid-flight resolves the first one before starting.
+            endTabTransition();
+
+            /* Read the scroll position BEFORE anything is written, and read no
+               geometry at all after the freeze.
+
+               Measured at library scale: setting the frozen styles costs
+               0.2-0.4ms, and a single `getBoundingClientRect()` afterwards costs
+               77.7ms — a forced synchronous layout landing on the animation's
+               first frame. The transform itself is free (59.9fps on a
+               1,228,722px box, zero dropped frames), so a hitch here reads as
+               "the slide is janky" and the transform takes the blame. Do not
+               add a measurement to this function. */
+            const y = window.scrollY;
+
+            const searchTerm = applyTabState(contentName);
+
+            /* Render the incoming tab while it is still off screen and still
+               not the active one. It has to hold its content before any of it
+               is visible: a tab that has never been active has never been
+               rendered, so it carries an empty grid and a live `.loading`
+               spinner from first paint, and revealing it early shows that
+               spinner rather than blank rows.
+
+               No card entrance animation — see `filterAndSortMedia()`. */
+            filterAndSortMedia(searchTerm, contentName, false);
+
+            // Which way the grids travel. A swipe left sends the outgoing tab
+            // left and brings the incoming one in from the right.
+            const shift = direction === 'forward' ? '-100%' : '100%';
+            const from = direction === 'forward' ? '100%' : '-100%';
+
+            document.documentElement.classList.add('tab-transitioning');
+
+            outgoing.style.top = `${-y}px`;
+            outgoing.classList.add('tab-leaving');
+            incoming.style.setProperty('--tab-shift', from);
+            incoming.classList.add('tab-entering');
+
+            /* The outgoing tab is out of the scroller now, and the incoming one
+               is off screen, so this moves nothing the viewer can see. That is
+               what makes the slide a single continuous movement instead of a
+               jump followed by one. Still routed through the overlay system:
+               an overlay may hold the scroll lock.
+
+               'instant' is required, not a preference. `scroll-behavior: smooth`
+               is set on the document, so the default animates for about a second
+               underneath a 280ms transition and is still travelling when it
+               ends — the slide finishes and the page then drifts to the top on
+               its own. Measured before this argument existed: the page was still
+               at 3000px two frames in and settled at 12px, not 0. */
+            window.GlimpseOverlays.scrollPageTo(0, 'instant');
+
+            document.querySelectorAll('.content').forEach(content => {
+                content.classList.remove('active');
+            });
+            incoming.classList.add('active');
+
+            const onEnd = event => {
+                // Only the panel's own transform, not a card's entrance fade.
+                if (event.target === incoming && event.propertyName === 'transform') {
+                    endTabTransition();
+                }
+            };
+            incoming.addEventListener('transitionend', onEnd);
+
+            tabTransition = {
+                outgoing,
+                incoming,
+                onEnd,
+                /* Reduced motion collapses the duration app-wide rather than
+                   removing the transition, so `transitionend` still fires. This
+                   covers the case it does not — an interrupted or dropped
+                   transition must not strand a tab pinned and transformed. */
+                timer: setTimeout(endTabTransition, TAB_TRANSITION_MS + 120),
+            };
+
+            /* TWO frames, not one, and the second is the load-bearing one.
+
+               One frame is all the browser needs to have taken the starting
+               transforms — that is what a card's entrance fade waits for. But
+               the incoming tab's window was just built, and a rAF callback runs
+               BEFORE that frame's layout and paint. Starting the transform in
+               the first callback therefore puts the cost of laying out and
+               painting a fresh 120-card grid on the animation's opening frame.
+
+               Measured at library scale before this second frame existed: the
+               slide's first frame took 183.4ms of its own 280ms, so two thirds
+               of the animation was already over when it became visible. It read
+               as a jump, and every frame after it was a clean 16.7ms — the
+               transform was never the problem.
+
+               The extra frame is invisible: the incoming tab is parked a full
+               viewport to the side and the outgoing one has not begun to move,
+               so nothing on screen has changed yet. */
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    if (!tabTransition) return;
+                    outgoing.style.setProperty('--tab-shift', shift);
+                    incoming.style.setProperty('--tab-shift', '0px');
+                    outgoing.classList.add('tab-sliding');
+                    incoming.classList.add('tab-sliding');
+                });
+            });
         }
 
         // Tab switching - update for both desktop and mobile tabs
@@ -2650,10 +2932,28 @@
             return data;
         }
 
-        // Filter and sort media based on search term and sort method
-        function filterAndSortMedia(searchTerm) {
-            const activeTab = document.querySelector('.tab.active').dataset.content;
-            const data = activeTab === 'movies' ? moviesData : tvShowsData;
+        /* Filter and sort media based on search term and sort method.
+
+           `type` names the tab to render and defaults to the active one. It has
+           to be a parameter rather than a read of `.tab.active`, because the tab
+           transition renders the INCOMING tab before handing it the active
+           class — the outgoing tab is still the active one at that point, so
+           reading it there would re-render the tab being left and leave the
+           arriving one empty.
+
+           The local is deliberately not called `activeTab`: during a transition
+           it names a tab that is not active yet, and a name asserting otherwise
+           is how the next reader reintroduces the read. Every call that is not
+           the transition omits the argument and behaves exactly as before.
+
+           `animateCards` is false only for a tab arriving on a slide. The
+           entrance fade exists to soften a grid appearing in place; a tab that
+           is travelling across the viewport as one object is already a soft
+           arrival, and staggering its cards underneath the slide is both
+           redundant and the most expensive thing on that frame. */
+        function filterAndSortMedia(searchTerm, type, animateCards = true) {
+            const target = type || document.querySelector('.tab.active').dataset.content;
+            const data = target === 'movies' ? moviesData : tvShowsData;
 
             // First filter by search term
             let filtered = data.filter(item =>
@@ -2671,7 +2971,7 @@
             const sortedData = sortMedia(filtered, currentSortMethod);
 
             // Display the sorted data
-            displayMedia(sortedData, activeTab);
+            displayMedia(sortedData, target, animateCards);
         }
 
         /* ------------------------------------------------------------------
@@ -2957,7 +3257,7 @@
         })();
 
         // Display media items with enhanced animations
-        function displayMedia(data, type) {
+        function displayMedia(data, type, animateCards = true) {
             const contentDiv = document.querySelector(`#${type}-content`);
             const loadingDiv = contentDiv.querySelector('.loading');
             const grid = contentDiv.querySelector('.media-grid');
@@ -3027,13 +3327,18 @@
             view.first = -1;
 
             measureGrid(view);
-            renderWindow(view, 0, true);
+            renderWindow(view, 0, animateCards);
 
             if (view.rowPitch <= 0) {
                 // No card had been laid out yet, so the pitch was unknown and
                 // the spacers were sized against nothing. Now one exists.
+                //
+                // This branch is always taken for a tab being rendered for the
+                // first time — no card of that type has ever been laid out — so
+                // the first tab switch pays for two windows, not one. That is
+                // the frame budget a slide is competing with.
                 measureGrid(view);
-                renderWindow(view, 0, true);
+                renderWindow(view, 0, animateCards);
             }
         }
 
@@ -3418,32 +3723,34 @@
                     const distance = Math.abs(diffX);
 
                     if (distance > swipeThreshold) {
-                        let switched = false;
+                        /* The direction is passed through so the outgoing grid
+                           leaves toward the finger. Without it `switchTab()`
+                           falls back to the instant swap, which is also what a
+                           tab click gets.
 
+                           No toast after a successful swipe. There used to be
+                           one — "Switched to TV Shows", 1.5s — and it was a
+                           caption for a transition that did not exist: when the
+                           tab change was an instant cut, nothing on screen
+                           connected the gesture to its result. The slide is that
+                           confirmation now, and it says more than the toast did,
+                           because it also states which direction the viewer
+                           travelled. Announcing it a second time, in words,
+                           after the fact, is one confirmation too many.
+
+                           The first-load tip above stays. It teaches a gesture
+                           that is otherwise undiscoverable, which nothing else
+                           does. */
                         if (diffX > 0) {
                             // Swiped left, show TV Shows
                             if (activeTab === 'movies') {
-                                switched = true;
-                                swipeIndicator.textContent = 'Switched to TV Shows';
-                                switchTab('tvshows');
+                                switchTab('tvshows', 'forward');
                             }
                         } else {
                             // Swiped right, show Movies
                             if (activeTab === 'tvshows') {
-                                switched = true;
-                                swipeIndicator.textContent = 'Switched to Movies';
-                                switchTab('movies');
+                                switchTab('movies', 'back');
                             }
-                        }
-
-                        // Only show the indicator if we actually switched tabs
-                        if (switched) {
-                            swipeIndicator.style.opacity = '0.9';
-
-                            // Hide indicator after 1.5 seconds
-                            setTimeout(() => {
-                                swipeIndicator.style.opacity = '0';
-                            }, 1500);
                         }
                     }
                 }

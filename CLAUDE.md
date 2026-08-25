@@ -405,6 +405,48 @@ those tags.
     wait for it to land. Measuring mid-flight reads a position the user never
     occupied, and it looks exactly like a windowing bug — it cost a full
     debugging pass here, and produced a fix for a cause that did not exist.
+    - It is also why `scrollPageTo()` takes a `behavior`. The tab transition
+      scrolls to the top of the incoming tab *underneath* the slide, so a smooth
+      scroll there is still travelling when the animation ends and the page
+      drifts to the top a beat later. Measured: still at 3000px two frames in,
+      settling at 12px rather than 0.
+- **The tab swipe slides both grids, and every part of that is measured.** The
+  outgoing tab is frozen with `position: fixed` at `-scrollY` so it leaves the
+  scroller; the page is then set to 0 in the one frame nothing on screen
+  reflects it. That is what makes it one movement rather than a jump followed by
+  a slide — both tabs share one document scroll, so there is no other way to
+  show the incoming tab's top while the outgoing shows where the viewer was.
+  - **The freeze reads NO geometry.** Setting the frozen styles costs 0.2–0.4ms;
+    a single `getBoundingClientRect()` afterwards costs **77.7ms**, landing on
+    the animation's first frame. `tests/test_tab_transition.py` bans the whole
+    family — `offsetHeight`, `getComputedStyle`, all of it — because the symptom
+    is "the slide is janky" and the transform is what gets blamed.
+  - **The transform is never the cost, and the layer size is not the axis.** A
+    `translateX` on a box 1,228,722px tall holds 59.9fps with zero dropped
+    frames. Bounding it to `100vh` changes neither the frame rate nor the
+    scrollable overflow — that mitigation was proposed, measured, and dropped.
+  - **The slide starts two rAFs after the render, not one.** A rAF callback runs
+    *before* that frame's layout and paint, so one frame puts a fresh 120-card
+    grid's layout on the animation's opening frame: **183.4ms of a 280ms
+    slide**, with every frame after it a clean 16.7ms. Likewise `will-change`
+    belongs on the frozen and parked states, not on the sliding one, or layer
+    promotion is paid on the same frame.
+  - **A tab arriving on a slide does not also stagger its cards.** The entrance
+    fade softens a grid appearing *in place*; a tab crossing the viewport is
+    already a soft arrival, and the stagger was the largest cost on that frame.
+  - **Horizontal translate only.** `firstVisibleRow()` reads
+    `getBoundingClientRect().top`, so a `translateY` or a scale re-windows the
+    grid mid-flight against a position the viewer never occupied — an
+    off-by-one in the window, not a layout bug.
+  - **The animation is gated on `isMobile`, the gesture's own flag — never a
+    media query.** Same pairing rule as the affordances: two conditions
+    describing one capability drift, and this repo has already shipped a pair
+    that reached 992px and 768px independently.
+  - **`transform !== 'none'` does not prove a transition ran.** It is satisfied
+    by the *start* value, so it passes for a slide that never moves — and it
+    did, in the first version of this verification. Movement does not begin
+    until ~85ms after the class lands. Sample the path across frames, not a
+    point.
 - Python: `pathlib` over `os.path`, type hints on anything crossing a module
   boundary, and `print()` is the fetchers' interface — `docker logs` is how a
   user watches an import run. Don't replace it with a logger that hides output.

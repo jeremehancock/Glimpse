@@ -207,12 +207,22 @@
          * Note this does NOT make the lock aware of which overlays exist. It
          * takes a scroll position, nothing more; the registry-free rule at the
          * top of this file is about how overlays are FOUND, and that is
-         * untouched. */
-        function scrollPageTo(y) {
+         * untouched.
+         *
+         * `behavior` exists for the tab transition, which needs the opposite of
+         * the default. It scrolls the page to the top of the incoming tab while
+         * the outgoing one is pinned out of the scroller and the incoming one is
+         * still off screen — the one moment nothing on screen reflects the
+         * scroll position, which is what lets the slide be a single movement
+         * instead of a jump followed by one. A smooth scroll there animates for
+         * about a second UNDERNEATH the transition and is still travelling when
+         * it ends, so the page settles somewhere near the top a beat later. It
+         * defaults to 'smooth' so every existing caller is unchanged. */
+        function scrollPageTo(y, behavior = 'smooth') {
             if (locked) {
                 scrollY = y;
             } else {
-                window.scrollTo({ top: y, behavior: 'smooth' });
+                window.scrollTo({ top: y, behavior });
             }
         }
 
