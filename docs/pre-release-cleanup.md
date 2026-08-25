@@ -12,13 +12,19 @@ Work this list *before* the release PR, not after. Anything still here when
 
 ## Must go
 
-### 1. `docs/handover.md`
+### 1. `docs/handover.md` — **DONE, 2026-08-25**
 
-A snapshot of an in-progress rewrite, written for the next session. It names
-unfinished work, open questions and a punch list. Once the rewrite lands it is
-actively misleading — it describes a state that no longer exists. **Delete it**;
-its own header says so. Anything in it still worth keeping belongs in
-`CLAUDE.md` or a spec, and should be moved there rather than left behind.
+Deleted. What was worth keeping moved rather than vanishing:
+
+- the publish bootstrap and the by-hand `:dev` build command →
+  `docs/development-workflow.md`, "The publish bootstrap"
+- the Node 16 ESLint trap (a *config* error that reads as a broken config) →
+  `docs/development-workflow.md`, Prerequisites
+- the frontend-verification rules → `tools/README.md` and `CLAUDE.md`
+- the windowed-grid invariants → `CLAUDE.md`
+
+The remaining punch-list item (5 — animate the movies/TV swipe) is not in a
+doc; it is unstarted work, not a project rule.
 
 ### 2. The config adapter in `web/index.html`
 
@@ -30,7 +36,7 @@ ES-modules change does NOT land before release, this block stays** — it is
 working code, not dead code, and removing it without its replacement breaks the
 app. Say so in the PR rather than deleting it on principle.
 
-### 3. `tools/` and this file
+### 3. `tools/` — **DECIDED: keep all three, 2026-08-25**
 
 `tools/browser.py`, `tools/seed_library.py` and `tools/grid_metrics.py` are
 development scaffolding. None is shipped — the `Dockerfile` copies `scripts/`,
@@ -45,13 +51,14 @@ pins the source decisions, but the numbers themselves only exist when someone
 runs this against thousands of items. Delete it and the next regression is found
 by a user.
 
-**Decide deliberately rather than by default.** Keeping them means keeping
-`tools/README.md` accurate and keeping them working. Deleting them means the
-next person rebuilds `browser.py` from a transcript for the third time. Either
-answer is fine; drifting into "they're still there and nobody knows if they run"
-is not.
+**Decided: all three stay.** They never enter the image, so they cost a user
+nothing, and two of them now guard live invariants — `grid_metrics.py` produces
+the only evidence that the grid's bound still holds, and `browser.py` had
+already been rebuilt from transcripts twice. The obligation that comes with
+keeping them is keeping `tools/README.md` accurate and keeping them working.
 
-This file goes when the list is empty.
+**This file goes when the list is empty.** It is not: items 2, 5, 7 and 8
+remain.
 
 ### 4. The `openspec/changes/` backlog
 
@@ -60,13 +67,21 @@ Six changes are implemented and unarchived, and `openspec/specs/` is still
 the specs the source of truth, and it must happen in the same PR as the code.
 `/ship` handles it. Do not archive before the user has validated a `:dev` image.
 
-### 5. Stale screenshots in `assets/`
+### 5. Stale screenshots in `assets/` — **DEFERRED, and the README no longer
+shows them**
 
 All six predate the rewrite. `screenshot-details-*` show the detail view as a
 centred box with a corner close button — the presentation the tray conversion
-replaced. They are served from `main`, so nobody sees them as wrong until the
-rewrite merges, and then all six are wrong at once. Needs a real media library,
-so it is a release-time task.
+replaced.
+
+On 2026-08-25 the image block was **commented out of `README.md`** rather than
+shipped wrong: a picture of an interface that no longer exists is the first
+thing a prospective user sees, and worse than no picture. The files stay in
+`assets/`, the block stays in the README as a comment, and re-adding them is
+uncommenting it once new ones exist.
+
+**Still outstanding.** Needs a real media library, so it remains a release-time
+task — now a follow-up rather than a blocker.
 
 ---
 
@@ -81,15 +96,20 @@ so it is a release-time task.
 Separately: `main` has no `.github/workflows/`, so `docker-publish.yml` has never
 been registered and `:dev` is built by hand. The first merge to `main` is what
 registers the trigger — which means that merge may itself publish nothing.
-Verify Docker Hub afterwards. See `docs/handover.md` while it still exists.
+Verify Docker Hub afterwards. See "The publish bootstrap" in
+`docs/development-workflow.md`.
 
-### 7. `error_page 500 502 503 504 /50x.html` with no `50x.html`
+### 7. `error_page 500 … /50x.html` with no `50x.html` — **DONE, 2026-08-25**
 
-`config/nginx.conf` declares the directive and the image ships no such file, so
-every 5xx nginx generates is rewritten to a **404**. Found while testing the
-caching change and left alone as out of scope. It is a real papercut for anyone
-debugging a broken install: the status they see is not the status that occurred.
-Either ship a `50x.html` or drop the directive.
+Fixed, and it was worse than this entry recorded. The location rooted at
+`/usr/share/nginx/html`, which ships only the distro's own index, so a 5xx fell
+through to `error_page 404 /index.html` and returned **HTTP 404 with 186,727
+bytes — the entire application shell**. A user whose backend had failed saw a
+working-looking app with no data, indistinguishable from an empty library.
+
+Now `web/50x.html`, rooted at `/app/web`, `internal`, self-contained, and not
+precached by the service worker. Measured after: HTTP 500, 4,538 bytes. Four
+tests in `tests/test_cache_policy.py` keep the directive and the file together.
 
 ### 8. The legacy fetchers' ruff carve-out
 

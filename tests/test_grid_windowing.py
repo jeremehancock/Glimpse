@@ -11,10 +11,11 @@ the behavioural proof lives in `tools/grid_metrics.py`, run against a library
 seeded to thousands. Both halves are needed: a regex cannot prove the grid is
 fast, and a measurement nobody re-runs cannot stop a regression.
 
-The trap `docs/handover.md` records for this item is the reason the split is
-spelled out. A test asserting "the DOM is bounded" against a few-hundred-item
-fixture passes whatever the code does — it was already true before windowing
-existed. Such a test is worse than none, because it reports the guarantee as
+The split is spelled out because of the trap this defect was found through: a
+test asserting "the DOM is bounded" against a few-hundred-item fixture passes
+whatever the code does — it was already true before windowing existed. A
+400-item fixture showed nothing wrong here twice, which was not evidence of
+health. Such a test is worse than none, because it reports the guarantee as
 held.
 """
 

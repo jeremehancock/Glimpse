@@ -1,9 +1,5 @@
 # Development workflow — Claude Code, OpenSpec & releases
 
-> **Mid-rewrite.** See [handover.md](handover.md) for what has shipped to `dev`,
-> what is unfinished, and why `:dev` is currently built by hand. Read it before
-> acting on the release flow described below.
-
 How Glimpse is developed: the **`dev` branch for feature work and testing**,
 **`main` for releases**, with every capability specified before it is built.
 
@@ -38,8 +34,8 @@ skipping the CI gate.
 > **default branch**, and `main` currently has no `.github/workflows/` directory
 > at all — so `docker-publish.yml`, which lives on `dev`, is not registered and
 > has never fired. The Actions-tab override cannot rescue it for the same reason.
-> Build `:dev` by hand until the workflows land on `main`; see
-> [handover.md](handover.md).
+> Build `:dev` by hand until the workflows land on `main` — the command is
+> under "The publish bootstrap" below.
 >
 > Expect one wrinkle when they do: putting the file on `main` is what registers
 > the trigger, so the merge that lands it may not publish for its own CI run.
@@ -52,16 +48,48 @@ skipping the CI gate.
 ### The version floor
 
 Docker Hub carries tags up to **`1.3.0`** from years of manual `docker build`
-runs. This repo has **no git tags at all** — the release workflow is new, and
-nothing before it ever created one.
+runs, published long before this repo had a release workflow.
 
-So `VERSION` reads `1.3.0` to describe what is published, and **the first release
-cut through CI must bump past it.** If `VERSION` is still `1.3.0` when a PR
-merges to `main`, the workflow finds no `v1.3.0` git tag, concludes the version
-is unreleased, and publishes `bozodev/glimpse-media-viewer:1.3.0` over the
-existing image — different code under a tag someone may have pinned.
+`VERSION` therefore describes **what is published**, not what the git history
+contains, and **a release cut through CI must always bump past it.** A `v1.3.0`
+tag has since been pushed specifically to protect that image: without it the
+workflow would find the version unreleased and publish
+`bozodev/glimpse-media-viewer:1.3.0` over the existing one — different code under
+a tag someone may have pinned.
 
-`/ship` checks for this before opening a release PR. Don't route around it.
+`/ship` checks for this before opening a release PR. Don't route around it, and
+don't delete `v1.3.0`.
+
+### The publish bootstrap — `docker-publish.yml` may not be registered
+
+**GitHub fires `workflow_run` only for a workflow file on the default branch.**
+`main` has historically had no `.github/workflows/` directory at all, so
+`docker-publish.yml` was never registered and **never ran**:
+
+```bash
+$ gh workflow list --all
+CI	active	341412730      # the only workflow GitHub knew about
+```
+
+`workflow_dispatch` needs the same thing, so the Actions-tab override returns
+`HTTP 404: workflow docker-publish.yml not found on the default branch`. While
+that is true, `:dev` has to be built by hand:
+
+```bash
+# one-time, only if you want arm64
+docker run --privileged --rm tonistiigi/binfmt --install arm64
+
+docker buildx build --platform linux/amd64,linux/arm64 \
+  -t bozodev/glimpse-media-viewer:dev --push .
+```
+
+Drop `,linux/arm64` for a much faster x86-only build. Run `make docker-smoke`
+first.
+
+**The first merge that puts the workflows on `main` is what registers the
+trigger — which means that merge may itself publish nothing,** because the
+trigger did not exist when its CI run started. Check Docker Hub afterwards and
+be ready to build once more by hand.
 
 ### A separate instance for testing `:dev`
 
@@ -106,6 +134,14 @@ docker compose pull glimpse-dev && docker compose up -d glimpse-dev
 - **Node 18+** — ESLint and Prettier only. Nothing in `web/` is built or
   bundled; nginx serves those files exactly as authored, and no Node runs in the
   image.
+
+  > **On Node 16 this fails in a way that does not look like a version
+  > problem.** ESLint 9 reports
+  > `ConfigError: Key "rules": structuredClone is not defined` — a *config*
+  > error, not a lint error, so it reads as a broken `eslint.config.mjs` rather
+  > than a stale toolchain. If a machine's default is older, point at a newer
+  > one for the session:
+  > `export PATH="$HOME/.nvm/versions/node/v18.20.8/bin:$PATH"`.
 - **Docker** — for `make docker-smoke`
 - **Node 18+ and Git** — for the Claude Code and OpenSpec CLIs
 

@@ -2,17 +2,19 @@
 
 A sleek, responsive web application for browsing and viewing your Plex, Jellyfin, or Emby media library content. This dockerized solution fetches metadata and artwork from your media server and presents it in an elegant, user-friendly interface with support for multiple media servers.
 
-![Glimpse Media Viewer Plex Main](https://raw.githubusercontent.com/jeremehancock/Glimpse/main/assets/screenshot-main-plex-2.png)
+<!--
+  Screenshots removed deliberately, not lost.
 
-![Glimpse Media Viewer Plex Details](https://raw.githubusercontent.com/jeremehancock/Glimpse/main/assets/screenshot-details-plex-2.png)
+  All six predated the interface rewrite: `screenshot-details-*` showed the
+  detail view as a centred box with a corner close button, which is the
+  presentation the tray conversion replaced. They are still in `assets/` and
+  still referenced from the `main` branch by their raw.githubusercontent URLs,
+  so re-adding them is uncommenting this block once new ones are in place.
 
-![Glimpse Media Viewer Jellyfin Main](https://raw.githubusercontent.com/jeremehancock/Glimpse/main/assets/screenshot-main-jellyfin-2.png)
-
-![Glimpse Media Viewer Jellyfin Details](https://raw.githubusercontent.com/jeremehancock/Glimpse/main/assets/screenshot-details-jellyfin-2.png)
-
-![Glimpse Media Viewer Emby Main](https://raw.githubusercontent.com/jeremehancock/Glimpse/main/assets/screenshot-main-emby-2.png)
-
-![Glimpse Media Viewer Emby Details](https://raw.githubusercontent.com/jeremehancock/Glimpse/main/assets/screenshot-details-emby-2.png)
+  Showing a picture of an interface that no longer exists is worse than showing
+  none: it is the first thing a prospective user sees, and it would be a
+  promise the app does not keep.
+-->
 
 ## ✨ Features
 
