@@ -13,7 +13,6 @@ Detail lives elsewhere — this file is only what's expensive to get wrong:
 | The Docker image, the entrypoint, the local smoke test | [docs/docker.md](docs/docker.md) |
 | Project context + the capability map | `openspec/config.yaml` |
 | The release state machine and its guardrails | `.claude/commands/ship.md` |
-| Scaffolding that must not reach a release | [docs/pre-release-cleanup.md](docs/pre-release-cleanup.md) |
 
 ## `docker-compose.yml` is frozen
 
@@ -110,13 +109,14 @@ are merged on GitHub, so the local `main` ref is usually stale (use
 `VERSION` is load-bearing: it drives the pinned image tag, the git tag, and the
 GitHub Release. Don't edit it outside `/ship`.
 
-**`VERSION` starts ahead of git.** Docker Hub carries tags up to `1.3.0` from
-years of manual builds; this repo has no git tags at all, because the release
-workflow is new. So `VERSION` reads `1.3.0` to describe what is published, and
-the first release cut through CI must be a **bump past it**. Merging to `main`
-with `VERSION` still at `1.3.0` would tag `v1.3.0` and overwrite the published
-`1.3.0` image with different code. `/ship` checks for this; don't route around
-it.
+**`VERSION` must always bump past what Docker Hub already carries.** It describes
+what is published, not what the git history contains — Docker Hub held tags up to
+`1.3.0` from years of manual builds before this repo had any tags at all.
+`v1.3.0` and `v1.4.0` are now pushed and load-bearing: the publish workflow reads
+`VERSION`, and a version with no matching tag is treated as unreleased. Merging
+with `VERSION` unchanged republishes that tag over the existing image with
+different code. `/ship` checks for this; don't route around it, and don't delete
+those tags.
 
 ## Code conventions
 
