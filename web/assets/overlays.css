@@ -97,16 +97,41 @@
     background: #4b4f57;
 }
 
-.sheet__head {
+/* ONE head, worn by both shapes. Declared here rather than twice because the
+   two rules had already drifted: 14px against 16px of top padding, which put
+   the roulette's title 2px lower than every tray's below the same grab handle.
+
+   The vertical padding is shared BECAUSE the handle is shared. An overlay
+   carrying that handle makes a promise about where the panel begins, and the
+   title is the first thing that promise is measured against; trays are opened
+   one after another from the same screen, so a two-pixel difference between
+   them does not read as two pixels, it reads as the trays not sitting still.
+
+   Matching padding is only half of it. The distance the eye measures runs to
+   the glyph, not to the top of the line box, so the title's half-leading is
+   part of the gap — see the comment on .sheet__title, which is where the other
+   half is kept.
+
+   Only the horizontal inset differs, below, and it is not arbitrary: each head
+   is inset with the body beneath it. */
+.sheet__head,
+.modal__head {
     flex: 0 0 auto;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding: 14px 16px 12px;
+    padding-top: 14px;
+    padding-bottom: 12px;
     border-bottom: 1px solid var(--border);
     margin-bottom: 12px;
     touch-action: none;
+}
+
+/* Matching .sheet__body. */
+.sheet__head {
+    padding-left: 16px;
+    padding-right: 16px;
 }
 
 /* Deliberately the same type as .modal__head h2.
@@ -198,16 +223,11 @@
     touch-action: none;
 }
 
+/* Everything but the inset is shared with .sheet__head — see that rule in the
+   tray section. This is a dialog's head, so it is inset with .modal__body. */
 .modal__head {
-    flex: 0 0 auto;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 16px 20px 12px;
-    border-bottom: 1px solid var(--border);
-    margin-bottom: 12px;
-    touch-action: none;
+    padding-left: 20px;
+    padding-right: 20px;
 }
 
 .modal__head h2 {
@@ -387,8 +407,27 @@
     }
 
     /* Head padding did the spacing below the handle; without the handle the
-       title needs the dialog's own top padding instead. */
-    .sheet__head {
+       title needs the dialog's own top padding instead.
+
+       Keyed on a preceding grip, and both heads are named, so the compensation
+       lands on exactly the overlays that just lost a handle. It used to name
+       `.sheet__head` alone, which left the detail and roulette dialogs — whose
+       handles this same block hides — without it.
+
+       `~` and not `+`: `.modal-backdrop-art` sits between the detail overlay's
+       grip and its head, so the adjacent combinator would miss the one overlay
+       most in need of matching. It does mean the rule depends on the grip
+       staying a SIBLING of the head; nest it and this drops out silently, and
+       the title simply sits 4px high.
+
+       It must also stay inside this media query. A sibling selector matches a
+       grip that is `display: none`, so the selector alone says "has a grip in
+       the markup" — the breakpoint supplies "and it is hidden". That is the
+       same breakpoint hiding it, immediately above, and the two must not drift
+       apart. The trailer has no grip at any width and is deliberately
+       untouched: it never had a handle to compensate for. */
+    .sheet__grip ~ .sheet__head,
+    .sheet__grip ~ .modal__head {
         padding-top: 18px;
     }
 

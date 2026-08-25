@@ -975,13 +975,25 @@
             display: block;
         }
 
-        .modal-title {
-            margin: 0 0 10px 0;
-            font-size: 2.2em;
-            color: var(--light-text);
-            font-weight: 700;
-            line-height: 1.1;
-        }
+        /* `.modal-title` sets no type of its own. The rule that stood here did,
+           and every declaration in it was dead: `.modal__head h2` is (0,1,1)
+           and this class is (0,1,0), so `margin`, `font-size` and `font-weight`
+           all lost, and `color` restated the inherited `#fff`. It survived from
+           before the tray conversion, when this class WAS the title's type.
+
+           One declaration did win — `line-height: 1.1` — and it is why the
+           detail overlay held its title 1.5px tighter below the grab handle
+           than the trays did. The gap the eye measures runs to the glyph, not
+           to the top of the line box, so a title's half-leading is part of it;
+           see `.sheet__title` in overlays.css. Four dead declarations around it
+           are what made the rule look authoritative enough that nobody read the
+           fifth.
+
+           Deleted rather than trimmed to one line, deliberately: a rule listing
+           the properties it does not control is where the next unwanted one
+           goes unnoticed. The two `font-size` overrides in the media queries
+           below went with it, for the same reason. `.modal__fixed .modal-title`
+           stays — its line clamp is what bounds the fixed region. */
 
         .modal-year {
             font-size: 1.2em;
@@ -1342,10 +1354,6 @@
                 align-self: center;
             }
 
-            .modal-title {
-                font-size: 1.5em;
-            }
-
             .media-title {
                 overflow: hidden;
                 text-overflow: ellipsis;
@@ -1409,10 +1417,6 @@
 
             .media-added {
                 font-size: 0.75em;
-            }
-
-            .modal-title {
-                font-size: 1.4em;
             }
 
             .modal-section-title {

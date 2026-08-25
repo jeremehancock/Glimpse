@@ -206,6 +206,28 @@ it.
     consequence of the layout rather than a height someone has to re-guess per
     viewport — it used to be a hardcoded `280px` that overshot into scrolling
     content on every phone.
+  - **The two heads are ONE rule, and no overlay title sets `line-height`.**
+    Every overlay wearing the grab handle holds its title the same distance
+    below it, and that distance is measured to the **glyph**, not to the top of
+    the line box — so a title's half-leading is half the number. `.sheet__head`
+    and `.modal__head` therefore share their vertical padding in a single
+    selector list and differ only in horizontal inset. Two rules is the defect:
+    they were 14px and 16px, and nothing said they were related.
+    - The other half is why it took a browser to find. `.modal-title` set
+      `line-height: 1.1` against the inherited `1.5`, inside a rule whose four
+      other declarations were all outranked by `.modal__head h2` and did
+      nothing. So the padding — the thing anyone checks — looked fine, the rule
+      looked authoritative, and the overlays sat at three different gaps
+      (18.4px, 16.88px, 20.4px) that partly cancelled on one and compounded on
+      another. **A rule that appears to set an element's type must set it**;
+      dead declarations are where the next live one hides.
+    - The pointer-width bump that replaces the hidden handle is keyed
+      `.sheet__grip ~ …head`, naming both heads. `~` and not `+`, because
+      `.modal-backdrop-art` sits between the detail overlay's grip and its head.
+      It stays inside the media query that hides the grip: a sibling selector
+      matches a `display: none` grip, so the selector alone means "has a grip in
+      the markup" and the breakpoint supplies the rest. Same pairing rule as the
+      affordances — split them and a width exists with the wrong spacing.
   - **A rule that hides a page control must name where that control lives.**
     `.sort-toggle { display: none }` in a mobile media query meant "the header's
     sort controls", but the Actions overlay's body *is* a `.sort-toggle`, so the

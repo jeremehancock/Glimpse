@@ -38,6 +38,36 @@ def block_after(source: str, opener: str) -> str:
     return match.group(1)
 
 
+SHARED_HEAD = '.sheet__head, .modal__head'
+
+
+def css_rules(source: str, indent: int = 0) -> dict[str, str]:
+    """Every rule at ONE nesting level, keyed by its selector list.
+
+    Keyed by the whole list rather than found by substring, because the two are
+    not the same question here. `.modal__head` appears both alone and as the
+    second line of `.sheet__head, .modal__head`, so a search for the standalone
+    rule finds the shared one first and asserts against the wrong body — which
+    is a test that fails for a reason that has nothing to do with the code.
+
+    `indent` selects the level: 0 for top-level rules, 4 for those inside a
+    media query. Whitespace in the key is collapsed, so a selector list broken
+    across lines is looked up as it reads.
+    """
+    pad = ' ' * indent
+    pattern = rf'^{pad}([^\s@{{][^{{}}]*?)\{{(.*?)^{pad}\}}'
+    return {
+        re.sub(r'\s+', ' ', match.group(1)).strip(): match.group(2)
+        for match in re.finditer(pattern, source, flags=re.S | re.M)
+    }
+
+
+def css_block(source: str, selector: str, indent: int = 0) -> str:
+    rules = css_rules(source, indent)
+    assert selector in rules, f'no rule found for {selector!r}'
+    return rules[selector]
+
+
 @pytest.fixture(scope='module')
 def index() -> str:
     return strip_comments(INDEX.read_text())
@@ -310,9 +340,7 @@ def test_divider_is_scoped_away_from_artwork_only(index, overlays):
     scoped = block_after(index, '.modal__fixed .modal__head {')
     assert 'border-bottom: none' in scoped
 
-    base = re.search(r'\.modal__head \{(.*?)\n\}', overlays, flags=re.S)
-    assert base, '.modal__head base rule not found'
-    assert 'border-bottom: 1px' in base.group(1), (
+    assert 'border-bottom: 1px' in css_block(overlays, SHARED_HEAD), (
         'the base divider was removed rather than scoped; that flattens the '
         'trailer, roulette and server switcher to fix the detail overlay'
     )
@@ -322,3 +350,106 @@ def test_the_region_divider_survives(index):
     """`.modal-header`'s border marks where holding still becomes scrolling."""
     body = block_after(index, '.modal-header {')
     assert 'border-bottom: 1px' in body
+
+
+# ---------------------------------------------------------------------------
+# One distance from the handle to the title
+#
+# Every overlay wearing the grab handle holds its title the same distance below
+# it. The distance is measured to the GLYPH, not to the top of the line box, so
+# it has two terms and each was wrong independently: the two heads declared
+# 14px and 16px of top padding, and `.modal-title` set `line-height: 1.1`
+# against the 1.5 every other title inherits. They cancelled on the detail
+# overlay and compounded on the roulette, which is why it never presented as a
+# clean offset anyone would go looking for.
+# ---------------------------------------------------------------------------
+
+VERTICAL_PADDING = ('padding:', 'padding-top', 'padding-bottom', 'padding-block')
+
+
+def test_the_two_heads_cannot_declare_different_vertical_padding(overlays):
+    """Not "equal values" — one rule, so there are no two values to compare.
+
+    Asserting the numbers match would pass the day someone changes both to the
+    same wrong thing and, more to the point, would still permit two rules. Two
+    rules is the defect: they were 14px and 16px, and nothing said they were
+    related.
+    """
+    shared = css_block(overlays, SHARED_HEAD)
+    assert 'padding-top' in shared and 'padding-bottom' in shared, (
+        'the shared head rule no longer sets the vertical padding both heads depend on'
+    )
+
+    for selector in ('.sheet__head', '.modal__head'):
+        own = css_block(overlays, selector)
+        for prop in VERTICAL_PADDING:
+            assert prop not in own, (
+                f'`{selector}` sets its own {prop}, so the tray and the dialog can '
+                f'again hold their titles different distances below the same '
+                f'grab handle. Vertical padding belongs to the shared rule; '
+                f'this one carries the horizontal inset only.'
+            )
+
+
+TITLE_SELECTORS = ('.sheet__title', '.modal__head h2', '.modal-title', '#roulette-title')
+
+
+def test_no_overlay_title_sets_its_own_line_height(index, overlays):
+    """The half-leading is half the gap, and the only half that hides.
+
+    `line-height: 1.1` on `.modal-title` sat inside a rule of four dead
+    declarations, so it read as part of a definition rather than as an override.
+    Nothing about the padding — the thing anyone checks — looked wrong.
+    """
+    for source, name in ((index, 'index.html'), (overlays, 'overlays.css')):
+        for match in re.finditer(r'([^{}]+)\{([^{}]*)\}', source):
+            selector, body = match.group(1).strip(), match.group(2)
+            if 'line-height' not in body:
+                continue
+            for title in TITLE_SELECTORS:
+                # A trailing boundary, so `.modal-title-section` is not
+                # `.modal-title`. It is a real class in this markup.
+                if re.search(re.escape(title) + r'(?![\w-])', selector):
+                    raise AssertionError(
+                        f'{name}: `{selector}` sets line-height on an overlay '
+                        f'title. The gap below the grab handle is measured to '
+                        f'the glyph, so half-leading is part of it — an '
+                        f'override here moves the title without touching any '
+                        f'padding. Let it inherit.'
+                    )
+
+
+def test_the_handle_less_bump_reaches_both_heads(overlays):
+    """The compensation belongs to every head that just lost a handle."""
+    bump = '.sheet__grip ~ .sheet__head, .sheet__grip ~ .modal__head'
+    assert bump in css_rules(overlays, indent=4), (
+        'the padding that stands in for the hidden grab handle no longer names '
+        'both heads. Naming `.sheet__head` alone leaves the detail and roulette '
+        'dialogs — whose handles the same block hides — without it.'
+    )
+    assert '.sheet__grip + .modal__head' not in overlays, (
+        'the adjacent combinator misses the detail overlay: `.modal-backdrop-art` '
+        'sits between its grip and its head. Use `~`.'
+    )
+
+
+def test_hiding_the_handle_and_replacing_its_spacing_stay_together(overlays):
+    """One breakpoint, or a width exists where the title sits 4px high.
+
+    The same pairing rule the dismissal affordances live under. A sibling
+    selector matches a `display: none` grip, so the selector says only "has a
+    grip in the markup" — the media query supplies "and it is hidden", and it
+    has to be the one doing the hiding.
+    """
+    pointer = re.search(r'@media \(min-width: 768px\) \{(.*?)^\}', overlays, flags=re.S | re.M)
+    assert pointer, 'the pointer-width block is gone'
+    rules = css_rules(pointer.group(1), indent=4)
+
+    assert 'display: none' in rules.get('.sheet__grip', ''), (
+        'this block no longer hides the grab handle, so the padding that '
+        'compensates for hiding it is compensating for nothing'
+    )
+    assert any('~ .modal__head' in selector for selector in rules), (
+        'the handle is hidden at one breakpoint and its spacing replaced at '
+        'another; every width between shows a title too close to nothing'
+    )
