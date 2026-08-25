@@ -191,18 +191,16 @@ Alpine's transitions, the scroll lock and the focus manager all sequence on it.
 Every overlay sits frozen at `overlay-shut overlay-opening`. Such a run verifies
 that overlays render **shut**; it never opens one.
 
-Drive a real browser over the DevTools protocol instead. `websocket-client` is
-installed:
+Drive a real browser over the DevTools protocol instead. **The driver is
+committed — do not rebuild it.** See [`tools/`](../tools/README.md):
 
-```bash
-chromium --headless --disable-gpu --no-sandbox \
-  --remote-debugging-port=9333 --remote-allow-origins='*' \
-  --user-data-dir=/tmp/cdp-profile about:blank &
+```python
+from tools.browser import Browser, nginx_requests
 ```
 
-`--remote-allow-origins='*'` is required or the handshake 403s. Then
-`Emulation.setDeviceMetricsOverride` for the viewport and `Runtime.evaluate` to
-click and assert.
+`Browser.measure(selector)` returns rendered geometry plus type metrics, which is
+what punch-list item 3 needs. `tools/seed_library.py` generates a library at any
+size, which is what item 2 needs — it defaults to 7000 items for that reason.
 
 **Do not measure caching with `PerformanceResourceTiming.transferSize`.** It
 reads `0` for anything a service worker handled, whether the worker went to the
