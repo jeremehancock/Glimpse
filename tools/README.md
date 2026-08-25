@@ -4,8 +4,9 @@ Nothing here ships. The `Dockerfile` copies `scripts/`, `web/` and `config/`, an
 this directory is in none of them. It is also not imported by anything under
 `tests/`, so `make test` does not depend on it.
 
-**This directory is temporary.** It exists to get the rewrite finished. See
-[pre-release-cleanup.md](../docs/pre-release-cleanup.md) for what happens to it.
+These are kept on purpose, not left behind. `make test` cannot check anything
+these measure — CI has no browser and no library — so the guarantees they cover
+exist only when someone runs them.
 
 | File | What |
 | --- | --- |
