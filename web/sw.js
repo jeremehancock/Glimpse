@@ -1,12 +1,25 @@
 // Service Worker for Glimpse Media Viewer
 
-// Bumped from v7.3 by `replace-boot-time-html-rewriting`. The bump is
-// load-bearing, not cosmetic: before this change each server route was a
-// physically different index.html, so a client upgrading from v7.3 may hold a
-// cached page with a theme and data paths baked into its markup. Those entries
-// have to be discarded, and changing the cache name is what discards them.
-const CACHE_NAME = 'glimpse-media-viewer-v8.1';
-const DYNAMIC_CACHE = 'glimpse-media-dynamic-v8.1';
+// Bumped from v8.1 by `fix-overlay-layering-and-dead-tray-controls`, and from
+// v7.3 before that by `replace-boot-time-html-rewriting`. Both bumps are
+// load-bearing, not cosmetic.
+//
+// v7.3 -> v8.1: each server route used to be a physically different index.html,
+// so a client upgrading from v7.3 could hold a cached page with a theme and data
+// paths baked into its markup.
+//
+// v8.1 -> v8.2: under v8.1 the assets below were served CACHE-FIRST while the
+// app shell was served network-first. The shell therefore upgraded and the
+// stylesheets and scripts it loads did not — permanently, because the cache name
+// never changed during the whole rewrite. Every client that ever loaded a v8.1
+// build is pairing today's markup with whatever CSS and JS it first saw.
+//
+// That is not a stale-content annoyance, it is a correctness trap: it presented
+// as a fixed bug still being broken, and cost a full diagnostic pass to tell
+// apart from a real regression. The strategy change below is the actual fix;
+// this bump is what evicts the entries already poisoned.
+const CACHE_NAME = 'glimpse-media-viewer-v8.2';
+const DYNAMIC_CACHE = 'glimpse-media-dynamic-v8.2';
 
 // Assets to cache on install.
 //
@@ -37,7 +50,13 @@ self.addEventListener('install', (event) => {
       .open(CACHE_NAME)
       .then((cache) => {
         console.log('Service Worker: Caching static files');
-        return cache.addAll(STATIC_ASSETS);
+        /* Each entry requested with `cache: 'reload'` so the precache is filled
+           from the network rather than from the browser's HTTP cache. A plain
+           addAll() is allowed to satisfy itself from that cache, which on an
+           upgrading client still holds the PREVIOUS build's files — so the new
+           worker would faithfully precache the old app and then serve it as its
+           offline fallback. */
+        return cache.addAll(STATIC_ASSETS.map((url) => new Request(url, { cache: 'reload' })));
       })
       .then(() => {
         console.log('Service Worker: All static assets added to cache');
@@ -102,6 +121,22 @@ function isConfigRequest(request) {
   return new URL(request.url).pathname === '/config.json';
 }
 
+// The app's own stylesheets and scripts.
+//
+// These are fetched network-first, exactly like the app shell that loads them,
+// and NOT cache-first. Pairing a network-first shell with cache-first assets is
+// what pinned every installed client to the CSS and JS of whichever build it
+// first loaded: the markup upgraded, its behaviour did not, and the two drifted
+// apart with nothing to signal it.
+//
+// They stay in STATIC_ASSETS and are still precached on install, so the cache
+// fallback has them when the network is gone. That is the branch that matters
+// for an offline-capable PWA — alpine.min.js is vendored rather than fetched
+// from a CDN for precisely this reason, and it is still there.
+function isAppAssetRequest(request) {
+  return new URL(request.url).pathname.startsWith('/assets/');
+}
+
 // Check if request is for JSON data files (these need fresh data)
 function isJsonDataRequest(request) {
   return request.url.includes('/data/') && request.url.endsWith('.json');
@@ -129,6 +164,13 @@ self.addEventListener('fetch', (event) => {
   // The app shell - network first so an upgrade is picked up, cache as the
   // offline fallback.
   if (isAppShellRequest(event.request)) {
+    event.respondWith(networkFirstWithCacheFallback(event.request));
+    return;
+  }
+
+  // The app's stylesheets and scripts - the same strategy as the shell that
+  // loads them, so the two cannot drift apart. See isAppAssetRequest().
+  if (isAppAssetRequest(event.request)) {
     event.respondWith(networkFirstWithCacheFallback(event.request));
     return;
   }
@@ -218,11 +260,33 @@ async function staleWhileRevalidateStrategy(request) {
    was dead code and any edit made to it did nothing at all. Removed rather
    than merged: there was nothing in it the survivor lacks. */
 
-// Network-first with cache fallback for themed HTML
+/* Network-first with cache fallback.
+ *
+ * Serves the app shell AND the stylesheets and scripts it loads. Those two used
+ * to be split — a network-first shell over cache-first assets — which meant an
+ * upgraded page ran on assets that could never be replaced. One strategy across
+ * both is what keeps markup and behaviour from drifting apart.
+ *
+ * `caches.match()` searches every cache, so the fallback finds entries this
+ * function wrote to DYNAMIC_CACHE and entries the install step precached under
+ * CACHE_NAME alike. That is what keeps the app working offline: the assets are
+ * still precached, and a failed fetch lands on them.
+ *
+ * Named for the strategy rather than for one caller, because it now has two. */
 async function networkFirstWithCacheFallback(request) {
   try {
-    console.log('Fetching themed HTML from network:', request.url);
-    const networkResponse = await fetch(request);
+    console.log('Fetching from network:', request.url);
+    /* `cache: 'reload'` — go past the browser's own HTTP cache, do not merely
+       ask it politely.
+       A plain fetch() consults that cache, so a client still holding an entry
+       from before the Cache-Control fix keeps serving it until it expires on
+       its original schedule. Correcting the header stops NEW responses being
+       held; it cannot retract an entry the browser was already told to keep,
+       and under the old `max-age=604800` that is up to a week of an upgraded
+       app running week-old code. Bypassing here is what heals those clients on
+       their next load instead. The response is still written to the caches
+       below, so the offline fallback is unaffected. */
+    const networkResponse = await fetch(request, { cache: 'reload' });
 
     if (networkResponse.ok) {
       // Update cache with fresh themed content
@@ -234,13 +298,13 @@ async function networkFirstWithCacheFallback(request) {
     // If network fails, try cache
     const cachedResponse = await caches.match(request);
     if (cachedResponse) {
-      console.log('Network failed, serving cached themed HTML:', request.url);
+      console.log('Network failed, serving cached copy:', request.url);
       return cachedResponse;
     }
 
     return networkResponse; // Return the error response
   } catch (error) {
-    console.log('Network request failed for themed HTML, trying cache:', request.url);
+    console.log('Network request failed, trying cache:', request.url);
 
     // Try to get from cache
     const cachedResponse = await caches.match(request);

@@ -44,6 +44,17 @@
        the symptom would be an illegible handle on bright artwork only. */
     --grip-height: 17px;
 
+    /* How far artwork behind a grab handle must stay CLEAR of it.
+       `--grip-height` is the handle's lower edge, so a fade that reaches full
+       opacity there covers the handle itself: the handle occupies the last 5px
+       of that distance, where the artwork is already 71% opaque. Ending the fade
+       at the edge of the thing being protected is the bug this token exists to
+       stop coming back.
+       Derived, never restated as a second literal — the whole reason
+       `--grip-height` is a token is that two hand-copied values drift, and the
+       symptom is an illegible handle on bright artwork only. */
+    --grip-clear: calc(var(--grip-height) + 6px);
+
     /* --- Radii --- */
     --radius-sm: 6px;
     --radius-md: 10px;

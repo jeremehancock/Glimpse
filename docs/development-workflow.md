@@ -29,8 +29,21 @@ GitHub Release. Every build also gets an immutable `sha-<short>` tag.
 CI workflow (lint, tests, and the image smoke test) succeeds for that commit. A
 failing or cancelled CI publishes nothing. CI is **push-only** — pull requests
 don't trigger it, so each commit is built exactly once (its status still shows on
-the PR, because checks attach to the commit SHA). You can still run the publish
-workflow by hand from the Actions tab, which deliberately skips the CI gate.
+the PR, because checks attach to the commit SHA). A `workflow_dispatch` entry
+exists so the publish can also be run by hand from the Actions tab, deliberately
+skipping the CI gate.
+
+> **None of the publishing above is live yet.** GitHub registers both
+> `workflow_run` and `workflow_dispatch` only for a workflow file present on the
+> **default branch**, and `main` currently has no `.github/workflows/` directory
+> at all — so `docker-publish.yml`, which lives on `dev`, is not registered and
+> has never fired. The Actions-tab override cannot rescue it for the same reason.
+> Build `:dev` by hand until the workflows land on `main`; see
+> [handover.md](handover.md).
+>
+> Expect one wrinkle when they do: putting the file on `main` is what registers
+> the trigger, so the merge that lands it may not publish for its own CI run.
+> Check Docker Hub afterwards and push that first image manually if needed.
 
 **The loop:** build on `dev` (CI publishes `:dev`) → test the `:dev` image →
 **bump `VERSION` on `dev`** → open a PR from `dev` into `main`. Merging publishes

@@ -118,13 +118,35 @@ nginx aliases them; the app reads the active server from the first path segment
 and falls back to `primaryServer` at the root. A path naming an unconfigured
 server redirects to `/`.
 
-Two things in `config/nginx.conf` are load-bearing:
+Four things in `config/nginx.conf` are load-bearing:
 
 - **`location ^~ /data/`** — the `^~` matters. Without it nginx checks the regex
   location for image extensions *first*, so `/data/plex/posters/1.jpg` would
   resolve against the document root instead of the alias.
 - **`location = /config.json`** with `no-store` — a restart with new settings has
   to take effect on the next load, not whenever a cached copy expires.
+- **`location = /sw.js`** with `no-cache` — the exact match is what outranks the
+  `\.(css|js|…)$` regex below it, which used to hand the service worker a 7-day
+  cache. That is the worst file here to hold: it is the code that decides what
+  every other response may serve, so a stale copy freezes the caching policy of
+  the whole app *and* withholds the upgrade that would correct it.
+- **`location ^~ /assets/`** with `no-cache` — same collision, same `^~` trick as
+  `/data/`. These filenames carry no content hash and never will, because nothing
+  under `web/` is built or bundled: a changed stylesheet keeps its URL. Under the
+  old 7-day cache every client stayed pinned to the CSS and JS of the build it
+  first loaded while `index.html` went on upgrading, so new markup ran on old
+  behavior indefinitely.
+
+  `no-cache` means *revalidate*, not "do not store" — nginx answers 304 from the
+  ETag, so correctness costs one conditional request. `/images/` and the artwork
+  under `/data/` keep their 7-day cache; those are genuinely static.
+
+  This pairs with `networkFirstWithCacheFallback` in `web/sw.js`, which fetches
+  with `cache: 'reload'`. Both are needed and neither is sufficient: the worker's
+  own `fetch()` consults the HTTP cache, so a long `max-age` here defeats a
+  correct strategy — and a corrected header cannot retract an entry the browser
+  was already told to keep for a week. See the caching table in
+  [CLAUDE.md](../CLAUDE.md).
 
 ## The data volume
 

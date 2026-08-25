@@ -206,20 +206,96 @@ it.
     `.header-content`. The pair that hides a page control and shows the overlay
     trigger that replaces it belongs in **one media query**: split apart they had
     drifted to 992px and 768px, leaving every width between with neither.
+  - **An overlay that wears both shapes needs BOTH affordances, not either.**
+    A grab handle *and* a close button. They are not alternatives — each is
+    hidden at the width where the other is shown: the grip goes above 768px
+    because a mouse has no drag to make, the × goes below it because the handle
+    is the thumb-reachable target and two ways to close is worse than one. So a
+    panel carrying only a grip has nothing at pointer widths. The Actions tray
+    did exactly that, and between 769px and 992px — where the hamburger still
+    opens it — it appeared as a dialog with neither. Backdrop and Escape worked;
+    nothing on screen said so. A plain `.modal` is the exception: centred at
+    every width, never shows a grip, so its × is the whole affordance.
   - **A closing overlay is not an open one.** Both the scroll lock and the focus
     manager skip anything carrying `.overlay-closing`. Waiting for `display:none`
     instead pins the page for a beat after every dismissal, so the first flick is
     swallowed, and holds focus inside an overlay the user already closed.
+  - **`.genre-item` is the shared tray-choice control.** Both the genre tray and
+    the server switcher build their entries with it, deliberately — they are one
+    control offering different things, which is why the genre filter no longer
+    has to be written twice. A change to it lands in both, and that is the point;
+    styling them apart is how they drift. It carries a `__label` and an optional
+    `__count`, and it must declare its own background, border, radius, display
+    and font: it is a `<button>`, so anything it does not state, the browser
+    states for it. That is the whole of how it came to render as white system
+    boxes reading `Action794`.
+  - **An overlay's panel is not a bare wrapper — it has three regions.** A grip,
+    a head and a body, even where the content is a single spinner. The roulette
+    had none of them, so `.modal--tray-on-touch` alone would have produced a tray
+    with nothing to drag, no × (the modifier hides it on touch), and a backdrop
+    that deliberately does not dismiss: an overlay with no way out. The modifier
+    and the regions arrive together or not at all.
   - **The Actions tray is teleported to `<body>` on purpose.** `backdrop-filter`
     makes an element a containing block for its fixed-position descendants, so
     the moment the header becomes translucent a tray nested inside it renders
     squashed into the height of that bar. It looks correct on a desktop viewport
     either way, which is what makes it easy to "simplify" back into a bug.
+    - **A control inside that tray must be bound after `alpine:initialized`.**
+      Until Alpine boots, the tray is inert `<template>` content that
+      `querySelectorAll` cannot reach — and Alpine is a `defer` script, so it
+      runs *after* the page's inline `<script>` has finished. Every binding pass
+      that ran at parse time found only the header's copies, and left the tray's
+      sort buttons, server switcher and install button with no handlers at all.
+      Nothing throws: the control highlights, the tray dismisses, and nothing
+      happens, so it reports as the feature being missing rather than as a bug.
+      `bindRelocatedControls()` is the hook; the passes are idempotent and the
+      parse-time calls stay, so the header still works if Alpine ever fails.
+      Note that only *binding* was broken — queries made at click time reach the
+      teleported markup fine, which is why the tray's copy correctly showed the
+      active sort while doing nothing. That divergence is what made it look
+      wired.
+    - **An action inside an overlay cannot scroll the page.** The scroll lock
+      pins the body, so `window.scrollTo` moves nothing, and the lock then
+      restores the position captured when the overlay opened — overwriting it a
+      frame later. Call `window.GlimpseOverlays.scrollPageTo(y)`, which sets
+      the restore target while locked and scrolls normally when not, so one
+      handler serves a control that exists both in the page and in a tray.
+- **Page chrome ranks BELOW every overlay.** The ladder is `--z-chrome` (30) <
+  `--z-sheet` (50) < `--z-modal` (55), declared in `web/assets/tokens.css` and
+  read from there — a chrome element never restates a number. `.header` was 100
+  and `.scroll-to-top` was 1000, so a dialog rendered *under* the header on a
+  desktop and every tray on a phone slid in behind a header that stayed lit and
+  unblurred above its own backdrop. An overlay's backdrop exists to withdraw the
+  page; chrome that outranks it is not withdrawn.
 - **Alpine is vendored at `web/assets/alpine.min.js`, never loaded from a CDN.**
   A CDN script is a network dependency that fails exactly when the network is
   what failed — the one moment an offline-capable PWA has to work. Cached by the
   service worker for the same reason, and excluded from ESLint and Prettier
   because it is third-party.
+- **`/assets/` is network-first, at all three caching layers. Never "optimise"
+  any of them back.** Nothing under `web/` is built or bundled, so these
+  filenames carry no content hash and never will: a changed file keeps its URL.
+  Anything that holds them therefore pins a client to the build it first loaded.
+
+  | Layer | Setting | Where |
+  | --- | --- | --- |
+  | Service worker | `networkFirstWithCacheFallback`, not cache-first | `web/sw.js` |
+  | Browser HTTP cache | `no-cache` on `/assets/` **and `/sw.js`** | `config/nginx.conf` |
+  | The worker's own fetch | `cache: 'reload'`, including the install precache | `web/sw.js` |
+
+  All three had to change together, and each one alone looks harmless. The
+  worker's `fetch()` consults the HTTP cache, so a long `max-age` in nginx
+  defeats a correct strategy. `/sw.js` was matched by the `.js` extension rule
+  and cached for a week — the code that decides the caching policy, frozen,
+  withholding the upgrade that would fix it. And correcting a header cannot
+  retract an entry the browser was already told to keep, which is what
+  `cache: 'reload'` is for: it heals an already-poisoned client on its next load
+  instead of in seven days.
+
+  This cost a full diagnostic session. It presented as a fixed bug still being
+  broken, which is indistinguishable from a regression until you compare the
+  served bytes against the repo. `/images/` and `/data/` keep their 7-day cache;
+  they are genuinely static.
 - **The offline page exists once, in `web/offline.html`.** `sw.js` used to carry
   a second copy inlined as a template literal, with the Plex palette hardcoded;
   it had already gone stale against the themed original. Cache the file, never

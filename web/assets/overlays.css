@@ -438,6 +438,20 @@
         display: flex;
     }
 
+    /* Both shapes, not just the dialog that opted in. A `.sheet` below this
+       width IS a tray — that is what the pointer block above says by only
+       turning it into a dialog above 768px — so the reasoning applies to it
+       unchanged. It was scoped to `.modal--tray-on-touch` alone, which left the
+       genre and server trays showing a handle AND a ×.
+
+       This rule and the one above are a PAIR with the pointer block's
+       `.sheet__grip { display: none }`. One hides the handle and shows the ×,
+       the other does the reverse, and they must stay at the same breakpoint or
+       a width exists where an overlay has neither affordance. That is not
+       hypothetical here: the hand-off that hides the header's controls and
+       shows the tray trigger drifted to 992px and 768px once already, leaving
+       every width between with neither. */
+    .sheet .overlay__close,
     .modal--tray-on-touch .overlay__close {
         display: none;
     }

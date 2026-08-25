@@ -1,4 +1,4 @@
-# Handover — the rewrite, as of 2026-08-24
+# Handover — the rewrite, as of 2026-08-25
 
 Glimpse is mid-rewrite, modelled on [Marquee](https://github.com/jeremehancock/Marquee).
 All work is on **`dev`**. **Nothing goes to `main` until the rewrite is
@@ -22,7 +22,23 @@ log. Delete it when the rewrite lands.
 | `2aa387d` | **`convert-overlays-to-trays`** — six overlays onto one system |
 | `c2c2b2e` | Five regressions from the tray conversion |
 
-`make check` is green (98 tests). CI is green on `dev`.
+`make check` is green (142 tests). CI is green on `dev`.
+
+> **As of 2026-08-25 a full session of work sits UNCOMMITTED in the working
+> tree.** `/ship` has not been run. Two further changes were applied —
+> `fix-overlay-layering-and-dead-tray-controls` (44/45) and
+> `restyle-tray-controls` (37/38), each with only ":dev validation" left — and a
+> third, `serve-the-library-offline`, is drafted but not applied. Modified:
+> `CLAUDE.md`, `README.md`, `config/nginx.conf`, `docs/docker.md`, this file,
+> `web/index.html`, `web/sw.js`, and all three files under `web/assets/`. New:
+> `tests/test_overlay_layering.py`, `tests/test_tray_presentation.py`.
+> The six-item punch list at the end of this file is what the user wants
+> finished before any of it reaches `main`.
+>
+> **`make lint` needs Node 18+.** The shell default here is v16.20.1, which fails
+> ESLint 9 with a `structuredClone is not defined` *config* error — not a lint
+> error, so it is easy to misread. Use
+> `export PATH="$HOME/.nvm/versions/node/v18.20.8/bin:$PATH"`.
 
 ### Three OpenSpec changes are implemented but NOT archived
 
@@ -171,7 +187,14 @@ design, so one width proves nothing:
 | --- | --- | --- |
 | genre overlay | centred dialog | bottom tray |
 | grab handle | hidden | shown |
+| close button | shown | hidden |
 | hamburger | hidden | shown |
+
+The grab handle and close button rows are **inverses of each other**, and that is
+the property to check rather than either row alone. Every overlay that wears both
+shapes must carry both controls in its markup, because each is hidden at the
+width where the other is shown. A panel with only one of them has no affordance
+at some width — which is what the Actions tray did between 769px and 992px.
 
 **A passing markup test is not a passing feature.** The suite asserted overlays
 existed with correct ARIA and passed while `openModal()` threw on a renamed
@@ -189,11 +212,15 @@ before being committed; keep that habit.
    Emby `#0f1419`, Plex `#131313`. Blue-tinted `#0f1419` on green-branded Emby.
    Preserved exactly as the old implementation had it. Raised twice, unanswered.
 2. **Should the detail overlay be a tray on desktop too?** Specified as a dialog.
-3. **Should the genre filter be a popover anchored to its button on desktop**
-   rather than a centred dialog? Specified as a dialog — one fewer presentation
-   to maintain.
+3. ~~**Should the genre filter be a popover anchored to its button on desktop**
+   rather than a centred dialog?~~ **Answered: no.** One overlay at both widths,
+   for the genre filter and the server switcher alike. The same question was
+   raised again during `restyle-tray-controls` — the desktop genre control had
+   been reported as "still showing a tray" — and settled the same way. Two
+   implementations of one control is what the rewrite deleted, and it is why
+   every genre feature in this app previously had to be written twice.
 
-2 and 3 are recorded under Open Questions in
+2 is recorded under Open Questions in
 `openspec/changes/convert-overlays-to-trays/design.md`.
 
 ---
@@ -215,3 +242,84 @@ Most are already in [CLAUDE.md](../CLAUDE.md); these are the ones that cost time
   invocation. Cosmetic; reinstalling under Node 18+ would silence it.
 - **Node 18+ is required** for the lint toolchain (`nvm use 18.20.8`); the shell
   default here is Node 16.
+
+---
+
+## Punch list before `main` — stated 2026-08-25
+
+After reviewing the restyled trays ("this looks a lot better"), the user listed
+six things to get right before anything reaches `main`. Several were measured in
+that session, and the findings change what the work is — read these before
+assuming any item is unstarted.
+
+### 1. The desktop genre control should not be a tray
+
+**It already isn't.** Verified at 1280px against a container built from `dev`:
+the genre overlay is a centred dialog — `align-items: center`, grab handle
+hidden, close button shown. Either a stale build is being viewed (this exact
+report was traced to a stale service-worker cache once already) or the ask is for
+a **dropdown anchored to its button**.
+
+Confirm which before building. An anchored dropdown reverses open question 3
+above, answered "no — one overlay at both widths". That is a product decision,
+not a bug fix.
+
+### 2. Mobile trays are choppy and don't look like they rise from the bottom
+
+The durations are **not** the difference: Glimpse 200/280/150ms against Marquee
+180/300/120ms (`--dur-base` / `--dur-slow` / `--dur-exit`). The open genuinely
+animates `translateY(285px) → 0`. Two leads:
+
+- **The likely one.** `web/index.html` renders *every* item as a DOM node
+  (`mediaData.forEach`, ~line 2401); only the images lazy-load. A real library is
+  ~7,000 items. The scroll lock sets `position: fixed` on `<body>` on the same
+  frame the tray starts moving, forcing a full relayout of every card at frame 1.
+  Marquee's wall is paginated, so its document is far smaller. **A few-hundred
+  item fixture will never reproduce this — seed thousands.**
+- Alpine strips `overlay-opening` at ~275ms while the panel is still ~8px from
+  rest, handing the remainder to `.sheet__panel`'s base 200ms transition — an
+  easing discontinuity at the end of every open. On close the panel reaches 236px
+  down while the root is still at 0.61 opacity, so the panel outruns its backdrop.
+
+### 3. Every tray needs the same handle-to-title gap
+
+A measured defect — three different distances to the glyph. The eye measures to
+the glyph, so half-leading counts:
+
+| Overlay | head padding-top | line-height | gap to glyph |
+| --- | --- | --- | --- |
+| Genre / Server / Actions | 14px | 26.4px | 18.4px |
+| Detail | 16px | **19.36px** (override) | 16.9px |
+| Roulette | 16px | 26.4px | 20.4px |
+
+`.sheet__head` pads 14px and `.modal__head` 16px, and `.modal-title` carries a
+`line-height` override — precisely the edit `overlays.css` warns "is the edit
+most likely to undo this quietly".
+
+### 4. Verify the PWA caches properly
+
+Asset freshness was fixed (see the caching table in [CLAUDE.md](../CLAUDE.md)).
+What remains is that **the app has never worked offline**: `config.json` and the
+library snapshots use a cache fallback that nothing ever populates, so with no
+network the app shows "Glimpse is not configured". Fully drafted and not applied:
+`openspec/changes/serve-the-library-offline/`.
+
+### 5. Animate the movies/TV swipe
+
+Not started. The outgoing grid sliding out as the new one arrives. Both grids
+already exist as `#movies-content` and `#tvshows-content`, so a transform-based
+slide is plausible — but see the DOM size note in item 2 before animating a
+container holding thousands of nodes.
+
+### 6. Confirm CI/CD builds `:dev` and `:latest`
+
+The workflows are sound; the problem is where they live. **`main` has no
+`.github/workflows/` directory at all** — confirmed by
+`git ls-tree main .github/workflows/` returning nothing.
+`docker-publish.yml` triggers on `workflow_run`, which GitHub registers only from
+the default branch, so it has never fired and no image has ever been published by
+CI. Docker Hub secrets are set; CI itself runs green on every `dev` push.
+
+Expect a chicken-and-egg on the first merge: landing the file on `main` is what
+registers the trigger, so that first merge may itself publish nothing. Verify
+`:latest` on Docker Hub afterwards and be ready to publish it by hand once.

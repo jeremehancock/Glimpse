@@ -536,7 +536,14 @@ The theme follows the server you are viewing. If it looks wrong:
    docker logs glimpse-media-viewer | grep PRIMARY_SERVER
    ```
 
-2. Clear your browser cache and reload
+2. Reload the page
+
+   You should not need to clear anything. As of the version that introduced this
+   note, the app's stylesheets and scripts are revalidated on every load rather
+   than held, so an upgraded container takes effect on the next load. If you are
+   coming from an older version your browser may serve one stale page first —
+   load it a second time and it will correct itself.
+
 3. Un-install and Re-install PWA
 
 #### Library Exclusion Issues

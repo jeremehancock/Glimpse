@@ -167,6 +167,43 @@
             locked = open;
         }
 
+        /* Put the page at `y`, whether or not an overlay currently holds it.
+         *
+         * This exists because an action taken INSIDE an overlay cannot scroll
+         * the page. The body is pinned, so scrollTo() has nothing to move; and
+         * even if it did, the release above restores the position captured when
+         * the overlay opened and would overwrite it a frame later. Sorting from
+         * the Actions tray did exactly that — the grid re-sorted correctly and
+         * the page slid back to wherever the user had been, which reads as the
+         * scroll being ignored rather than as a conflict between two of them.
+         *
+         * So while locked this changes where the lock will restore TO, and the
+         * page lands there as the overlay finishes closing. A smooth scroll is
+         * not an option in that state and is not attempted: the restore is a
+         * single jump, so asking for an animation would only be a promise the
+         * pinned body cannot keep.
+         *
+         * Unlocked it simply scrolls, smoothly, because there is nothing in the
+         * way. One call site can therefore serve a control that appears both in
+         * the page and inside a tray without knowing which copy was activated —
+         * which is the whole reason it takes this shape rather than exposing the
+         * remembered offset for callers to assign.
+         *
+         * Note this does NOT make the lock aware of which overlays exist. It
+         * takes a scroll position, nothing more; the registry-free rule at the
+         * top of this file is about how overlays are FOUND, and that is
+         * untouched. */
+        function scrollPageTo(y) {
+            if (locked) {
+                scrollY = y;
+            } else {
+                window.scrollTo({ top: y, behavior: 'smooth' });
+            }
+        }
+
+        window.GlimpseOverlays = window.GlimpseOverlays || {};
+        window.GlimpseOverlays.scrollPageTo = scrollPageTo;
+
         function schedule() {
             if (queued) return;
             queued = true;

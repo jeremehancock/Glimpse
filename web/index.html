@@ -224,7 +224,18 @@
             right: 0;
             height: var(--header-height);
             background-color: var(--header-bg);
-            z-index: 100;
+            /* Page chrome, so it ranks BELOW every overlay — see the layering
+               scale in tokens.css. This was 100, above both overlay tiers, and
+               the consequences were not subtle: the detail dialog rendered
+               underneath the header on a desktop, and on a phone the header
+               stayed lit and unblurred above every tray's backdrop, so a tray
+               read as sliding in behind the page rather than over it.
+
+               An overlay's backdrop exists to withdraw the page. Chrome that
+               outranks the backdrop is not withdrawn, and where an overlay is
+               tall enough to reach under this bar, the bar covers its title and
+               its grab handle outright. */
+            z-index: var(--z-chrome);
             transition: height var(--transition-speed), box-shadow var(--transition-speed);
             box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
             backdrop-filter: blur(10px);
@@ -428,22 +439,111 @@
             }
         }
 
+        /* The shared tray-choice control. Used by BOTH the genre tray and the
+           server switcher — `populateServerTray()` builds its destinations with
+           this class deliberately, because they are the same control offering
+           different things. A change here lands in both, which is the intent;
+           styling them apart is how they drift.
+
+           Every property that resets the browser's own button chrome is
+           load-bearing rather than defensive. This rule used to describe
+           full-width `<div>` rows in a dropdown that no longer exists — padding,
+           cursor, white-space, font-size and nothing else — and the conversion
+           to a `<button>` left all of that in place. With no background, border,
+           colour, font or display of its own, the entry fell back to the user
+           agent's control: a white box with a system border and a system font,
+           laid out inline and wrapping raggedly across the tray.
+
+           `appearance: none` and `font: inherit` are what stop that coming back
+           on a browser whose defaults differ from the one it was checked in.
+
+           The authored all-genres placeholder in the markup is still a `<div>`
+           while every generated entry is a `<button>`. Specifying the chrome
+           explicitly is what makes the two render identically instead of the
+           placeholder flashing unstyled before updateGenreList() replaces it. */
         .genre-item {
-            padding: 10px 15px;
-            cursor: pointer;
-            transition: all var(--transition-speed);
-            white-space: nowrap;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 16px;
+            appearance: none;
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-pill);
+            color: var(--light-text);
+            font: inherit;
             font-size: 0.9rem;
+            line-height: 1.2;
+            text-align: left;
+            cursor: pointer;
+            transition: background var(--dur-base) var(--ease-standard),
+                border-color var(--dur-base) var(--ease-standard),
+                color var(--dur-base) var(--ease-standard);
         }
 
         .genre-item:hover {
-            background-color: rgba(255, 255, 255, 0.1);
+            background-color: #3c4048;
+            border-color: var(--border-strong);
         }
 
+        .genre-item:focus-visible {
+            outline: 2px solid var(--primary-color);
+            outline-offset: 2px;
+        }
+
+        /* The selection. `aria-pressed` on the element carries the same fact for
+           anyone not looking at it — a class alone is invisible to a screen
+           reader, which is why genreItem() sets both. */
         .genre-item.active {
             background-color: var(--primary-light);
+            border-color: var(--primary-color);
             color: var(--primary-color);
             font-weight: 600;
+        }
+
+        /* The name. Allowed to wrap rather than forced onto one line: a long
+           genre in a narrow tray takes two lines inside its own pill, which is
+           better than a pill that overflows the tray. */
+        .genre-item__label {
+            min-width: 0;
+        }
+
+        /* The count is secondary to the name it qualifies. Quieter, smaller, and
+           separated by the flex gap above — with neither element styled, `Action`
+           and `794` abutted as `Action794`, which reads as one word and makes the
+           name unrecognisable at a glance.
+
+           `:empty` rather than a class, because genreItem() writes an empty
+           string when there is nothing to count and populateServerTray() omits
+           the element entirely. Without this the flex gap still reserves space
+           beside a badge that renders nothing, so a server name sits oddly
+           off-centre in its own pill. */
+        .genre-item__count {
+            flex: 0 0 auto;
+            font-size: 0.75rem;
+            font-weight: 500;
+            color: var(--muted-text);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .genre-item.active .genre-item__count {
+            color: inherit;
+            opacity: 0.75;
+        }
+
+        .genre-item__count:empty {
+            display: none;
+        }
+
+        /* The two tray bodies that hold those choices.
+           Neither had any rule at all, which is the other half of the ragged
+           layout: inline-block children in a block container flow as text. */
+        .genre-tray__body,
+        .server-tray__body {
+            display: flex;
+            flex-wrap: wrap;
+            align-content: flex-start;
+            gap: 8px;
         }
 
         .genre-badge {
@@ -659,7 +759,11 @@
                 opacity var(--transition-speed),
                 transform var(--transition-speed);
             opacity: 0;
-            z-index: 1000;
+            /* Page chrome, on the same tier as the header. This was 1000 — a
+               number that beat every other value in the file rather than one
+               chosen against a scale, and it put this button above both overlay
+               tiers. It floated over an open tray, unreported. */
+            z-index: var(--z-chrome);
             box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
             font-weight: bold;
             font-family: monospace;
@@ -713,22 +817,68 @@
             opacity: 0.35;
             z-index: 0;
             pointer-events: none;
-            /* Fade out under the grab handle. The artwork still reaches the
+            /* Stay clear of the grab handle. The artwork still reaches the
                panel's top edge — the full-bleed look is the point — but the
                handle is the one affordance that dismisses a tray, and it was
                rendering on top of a picture.
 
+               Note the FIRST stop holds transparent all the way to
+               --grip-clear, and only then fades. The earlier version ramped
+               straight from `transparent 0` to opaque at --grip-height, which
+               is the handle's LOWER edge — so the handle sat in the tail of the
+               ramp under artwork at 71-100% opacity. Clearing a region means
+               being clear across the whole of it and then some, not arriving at
+               clear by the time you reach its far side.
+
                Moving the artwork's top down instead would leave a hard band of
                bare surface above it, which reads as a gap rather than a design.
 
-               A browser honouring neither property degrades to the previous
-               appearance, which is legible if imperfect — not a failure. */
+               This is one half of the fix. Paint order is the other: the
+               artwork is positioned and the grip is not, so the artwork covers
+               it whatever the mask says. See `.modal__fixed .sheet__grip`.
+
+               A browser honouring neither property still has the grip lifted
+               above the artwork, so it degrades to a handle on a picture —
+               imperfect, but not invisible. */
             -webkit-mask-image: linear-gradient(to bottom,
                     transparent 0,
-                    #000 var(--grip-height));
+                    transparent var(--grip-clear),
+                    #000 calc(var(--grip-clear) + var(--grip-height)));
             mask-image: linear-gradient(to bottom,
                     transparent 0,
-                    #000 var(--grip-height));
+                    transparent var(--grip-clear),
+                    #000 calc(var(--grip-clear) + var(--grip-height)));
+        }
+
+        /* Lift the grab handle above the item's artwork.
+           `.modal-backdrop-art` is positioned with `z-index: 0` and the grip is
+           in normal flow, so paint order puts the artwork on top regardless of
+           its opacity — the mask above was the only thing holding the line, and
+           it was miscalibrated. Both halves are needed: the mask alone loses to
+           paint order, and this alone leaves a grey handle on an arbitrary
+           photograph, making legibility a property of which item was opened.
+           `.modal-header` already does exactly this, for the same reason. */
+        .modal__fixed .sheet__grip {
+            position: relative;
+            z-index: 1;
+        }
+
+        /* No divider under the item's title.
+
+           `.modal__head` draws a `border-bottom`, and that is right everywhere
+           else — the trailer, the roulette and the server switcher all sit their
+           head on flat surface, where a hairline separates two bands and reads
+           as structure. Here the head is painted over the item's backdrop
+           artwork, so the same hairline crosses a photograph and reads as a
+           seam. The eye finds it before it finds the title.
+
+           Scoped rather than removed from the base rule: taking it off globally
+           would flatten three overlays to fix one. `.modal-header`'s own border
+           stays too — that one marks where the fixed region stops and the
+           scrolling region begins, at the foot of the identity block, on surface
+           rather than on artwork. */
+        .modal__fixed .modal__head {
+            border-bottom: none;
         }
 
         /* The fixed region of the detail overlay: grip, title bar and the item's
@@ -1080,7 +1230,10 @@
             font-size: 0.9rem;
             opacity: 0;
             transition: opacity 0.3s;
-            z-index: 90;
+            /* Page chrome. It reports on a swipe over the grid, which is a page
+               interaction — while an overlay is open the page is not what the
+               user is acting on, so this belongs under the overlay tiers. */
+            z-index: var(--z-chrome);
             pointer-events: none;
             box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
             text-align: center;
@@ -1478,6 +1631,21 @@
                     <!-- "Actions", not "Menu": these are things to do, not
                          places to go. -->
                     <span class="sheet__title">Actions</span>
+                    <!-- This tray had NO dismissal affordance above 768px. It
+                         carries only a grip, and the pointer block hides the
+                         grip because a mouse has no drag to make — so between
+                         769px and 992px, where the hamburger is still shown and
+                         this opens as a centred dialog, there was neither a
+                         handle nor a ×. Backdrop and Escape still worked, but
+                         nothing on screen said so.
+
+                         That band is the same one the sort/genre hand-off left
+                         empty when its two rules drifted apart. Overlays lose
+                         affordances at the seams between breakpoints, which is
+                         why the test asserts every panel keeps one on both
+                         sides of the touch breakpoint. -->
+                    <button class="overlay__close" @click="menuOpen = false"
+                        aria-label="Close">×</button>
                 </div>
                 <div class="sheet__body menu__body">
                     <!-- No Movies / TV Shows entries here. Switching content type
@@ -1545,9 +1713,16 @@
                     aria-label="Close">×</button>
             </div>
             <div class="sheet__body genre-tray__body">
-                <!-- Populated by updateGenreList(); the all-genres entry is the
-                     one fixed member, so it is authored rather than generated. -->
-                <div class="genre-item active" data-genre="all">All Genres</div>
+                <!-- Populated entirely by updateGenreList(), including the
+                     all-genres entry — it is the first thing genreItem() builds.
+
+                     An authored copy of that entry used to sit here, described
+                     as "the one fixed member". It was not: updateGenreList()
+                     clears this body before it fills it, so the markup was wiped
+                     on every run and never seen. Worse, it was a bare <div> that
+                     no code ever bound, so on the one path where the generated
+                     list failed to arrive it would have offered a dead control
+                     rather than an empty tray. -->
             </div>
         </div>
     </div>
@@ -2040,11 +2215,11 @@
             // Close the Actions tray if it is open
             setOverlay('menuOpen', false);
 
-            // Scroll to top when switching tabs
-            window.scrollTo({
-                top: 0,
-                behavior: 'smooth'
-            });
+            /* Scroll to top when switching tabs. Routed through the overlay
+               system because the line above admits an overlay may be open, and
+               a direct scroll would be discarded in exactly that case. With
+               nothing open this behaves identically. */
+            window.GlimpseOverlays.scrollPageTo(0);
         }
 
         // Tab switching - update for both desktop and mobile tabs
@@ -2142,23 +2317,68 @@
             setOverlay('genreOpen', false);
         }
 
-        // Add event listeners to sort buttons
-        document.querySelectorAll('.sort-button').forEach(button => {
-            if (button.dataset.sort) {  // Only for actual sort buttons, not genre buttons
-                button.addEventListener('click', () => {
+        /**
+         * Bind the sort controls.
+         *
+         * `onclick =` rather than addEventListener, and that is the whole reason
+         * this is a function: assignment REPLACES, so running this pass twice
+         * binds once. It has to be safe to re-run, because it is — see
+         * bindRelocatedControls() below.
+         */
+        function bindSortButtons() {
+            document.querySelectorAll('.sort-button').forEach(button => {
+                if (!button.dataset.sort) return;  // The genre and server buttons share this class.
+                button.onclick = () => {
                     setSortMethod(button.dataset.sort);
 
                     // Close the Actions tray if it is open
                     setOverlay('menuOpen', false);
 
-                    // Scroll to top when sort method changes
-                    window.scrollTo({
-                        top: 0,
-                        behavior: 'smooth'
-                    });
-                });
-            }
-        });
+                    /* Back to the top, so the new ordering is read from its
+                       beginning. Routed through the overlay system rather than
+                       scrolled directly: this same handler serves the header's
+                       copy of the control and the Actions tray's, and from
+                       inside the tray the page is pinned — a direct scrollTo
+                       moves nothing and is then overwritten by the scroll lock
+                       restoring where the user was. */
+                    window.GlimpseOverlays.scrollPageTo(0);
+                };
+            });
+        }
+
+        bindSortButtons();
+
+        /* Bind again once Alpine has finished initialising.
+         *
+         * THE PARSE-TIME PASS ABOVE CANNOT SEE THE ACTIONS TRAY. That tray is
+         * authored inside `<template x-teleport="body">`, so until Alpine boots
+         * it is inert template content that querySelectorAll does not reach —
+         * and Alpine is a `defer` script, so it boots after this one has run to
+         * completion. Every control in that tray was left with no handler at
+         * all: the sort buttons carried only the Alpine `@click` that closes the
+         * tray, and the server button carried nothing.
+         *
+         * The failure is invisible from every angle. Nothing throws. The tray
+         * opens, the control highlights, the tray dismisses on tap — and the
+         * grid does not change. It reports as "the mobile sort buttons do
+         * nothing", which reads like a sorting bug rather than a wiring one.
+         *
+         * Note that only the BINDING passes were broken. Queries made at click
+         * time reach the teleported markup fine, which is why tapping the
+         * header's sort control correctly marks the tray's copy active too —
+         * setSortMethod() queries when it runs. That divergence is what makes
+         * this worth a comment: the tray looks wired because its state tracks.
+         *
+         * Both passes are idempotent, so the earlier calls stay where they are.
+         * That is deliberate rather than lazy: if Alpine ever fails to load, the
+         * header's controls still work, and the app degrades to a page without
+         * overlays instead of a page without sorting. */
+        function bindRelocatedControls() {
+            bindSortButtons();
+            renderServerSwitcher();
+        }
+
+        document.addEventListener('alpine:initialized', bindRelocatedControls);
 
         /* The desktop dropdown's positioning logic, the mobile drawer's open and
            close functions, the click-outside handler and the manual body-overflow
@@ -2239,7 +2459,11 @@
 
             item.addEventListener('click', () => {
                 setGenreFilter(value);
-                window.scrollTo({ top: 0, behavior: 'smooth' });
+                /* Through the overlay system: this control only ever exists
+                   inside the genre tray, so the page is always pinned when it
+                   runs. A direct scrollTo here moved nothing and was then
+                   overwritten by the scroll lock restoring the old position. */
+                window.GlimpseOverlays.scrollPageTo(0);
             });
             return item;
         }
@@ -3029,7 +3253,12 @@
 
         // Get the mobile install button
         window.addEventListener('beforeinstallprompt', (e) => {
-            // Get the mobile install button inside the event listener
+            /* Queried HERE, inside the handler, and not hoisted to module scope
+               alongside `installButton`. The mobile copy lives in the Actions
+               tray, which Alpine teleports into <body> when it initialises — so
+               a module-scope query runs before the element exists and stores
+               null forever. hideInstallButtons() and showInstallButtons() query
+               at call time for the same reason. */
             const mobileInstallButton = document.querySelector('.mobile-install-button');
 
             // Don't show install prompt if already running as PWA
@@ -3480,24 +3709,45 @@
          user just asked for reads as the control not working. When it has
          nothing to pick it says so and offers Close, rather than vanishing
          silently, which is indistinguishable from a broken button. -->
-    <div class="modal" x-show="rouletteOpen" x-cloak style="display:none"
+    <div class="modal modal--tray-on-touch" x-show="rouletteOpen" x-cloak style="display:none"
         x-transition:enter="overlay-opening" x-transition:enter-start="overlay-shut"
         x-transition:enter-end="overlay-shown" x-transition:leave="overlay-closing"
         x-transition:leave-start="overlay-shown" x-transition:leave-end="overlay-shut"
         @keydown.escape.window="rouletteOpen = false">
         <div class="modal__backdrop"></div>
         <div class="modal__panel roulette-modal" role="dialog" aria-modal="true"
-            aria-label="Choosing something to watch" aria-live="polite" tabindex="-1">
-            <div class="roulette-spinner-container">
-                <div class="roulette-spinner">
-                    <div class="spinner-item"></div>
-                    <div class="spinner-item"></div>
-                    <div class="spinner-item"></div>
-                </div>
-                <div class="finding-text">Finding something for you...</div>
+            aria-labelledby="roulette-title" tabindex="-1">
+            <!-- The three regions. They are what `modal--tray-on-touch` needs to
+                 mean anything: the modifier hides the × on touch, so a panel
+                 with no grab handle to replace it — and a backdrop that
+                 deliberately does not dismiss — would be an overlay with no way
+                 out at all. The modifier and these arrived together. -->
+            <div class="sheet__grip"><span class="sheet__handle"></span></div>
+            <div class="modal__head">
+                <h2 id="roulette-title">Roll the Dice</h2>
+                <!-- There was no close control here at any width, outside the
+                     "nothing to pick" state. Tolerable while this was a
+                     two-second status flash; not tolerable the moment a pick
+                     hangs. -->
+                <button class="overlay__close" @click="rouletteOpen = false"
+                    aria-label="Close">×</button>
             </div>
-            <div class="roulette-error-buttons" style="display: none;">
-                <button class="roulette-close-btn" @click="rouletteOpen = false">Close</button>
+            <!-- aria-live sits on the region whose CONTENT changes, not on the
+                 panel. It used to be on the panel alongside aria-modal, which
+                 announces the whole dialog rather than the status line that
+                 actually updates. -->
+            <div class="modal__body" aria-live="polite">
+                <div class="roulette-spinner-container">
+                    <div class="roulette-spinner">
+                        <div class="spinner-item"></div>
+                        <div class="spinner-item"></div>
+                        <div class="spinner-item"></div>
+                    </div>
+                    <div class="finding-text">Finding something for you...</div>
+                </div>
+                <div class="roulette-error-buttons" style="display: none;">
+                    <button class="roulette-close-btn" @click="rouletteOpen = false">Close</button>
+                </div>
             </div>
         </div>
     </div>
@@ -3557,16 +3807,20 @@
             }
         }
 
+        /* Sized to its content; everything else comes from `.modal__panel`.
+           Background, radius, shadow and padding are the overlay system's now —
+           restating them here is how this panel ended up not matching the others
+           and not responding to the tray/dialog switch.
+
+           The `transform: translateY(30px)` that used to sit here was worse than
+           redundant. `.overlay-shut/.overlay-shown .modal__panel` outrank it
+           during a transition, so it looked harmless — but the moment Alpine
+           removed those classes at the end of the entrance, this rule took over
+           and dropped the settled panel 30px. A leftover from an animation the
+           transition system replaced. */
         .roulette-modal {
-            background-color: var(--secondary-bg);
-            border-radius: 16px;
-            width: 90%;
             max-width: 400px;
-            padding: 30px 20px;
             text-align: center;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
-            transform: translateY(30px);
-            transition: transform 0.3s ease;
         }
 
         /* Spinner Animation */
@@ -3639,22 +3893,15 @@
             background-color: var(--primary-hover);
         }
 
-        /* Responsive Styles */
+        /* Responsive Styles.
+           The width overrides that used to live here are gone: below 768px this
+           panel is a tray, and `.modal--tray-on-touch .modal__panel` already
+           takes the full width and squares off its bottom corners. A `width:
+           95%` fighting that produced a tray docked to the bottom edge with a
+           gap down each side. */
         @media screen and (max-width: 768px) {
-            .roulette-modal {
-                width: 95%;
-                padding: 25px 15px;
-            }
-
             .finding-text {
                 font-size: 1.1rem;
-            }
-        }
-
-        @media screen and (max-width: 480px) {
-            .roulette-modal {
-                width: 95%;
-                padding: 20px 10px;
             }
         }
     </style>
