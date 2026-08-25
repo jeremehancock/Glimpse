@@ -321,3 +321,78 @@ def test_offline_page_is_served_only_as_a_last_resort(sw):
         served_from.append(name)
 
     assert served_from, 'nothing serves /offline.html; an offline navigation gets a blank screen'
+
+
+# ---------------------------------------------------------------------------
+# The 5xx page
+#
+# `error_page 500 502 503 504 /50x.html` pointed at `/usr/share/nginx/html`,
+# which ships only the distro's own index. So `/50x.html` did not exist, the
+# 5xx fell through to `error_page 404 /index.html`, and nginx served the whole
+# application shell with status 404 — measured at 186,727 bytes. A user whose
+# backend had failed got a working-looking app that could not load its data,
+# which is indistinguishable from a library with no media in it.
+#
+# The status a user sees has to be the status that occurred.
+# ---------------------------------------------------------------------------
+
+NGINX_CONF = REPO_ROOT / 'config' / 'nginx.conf'
+
+
+def test_the_5xx_page_exists_where_nginx_looks_for_it():
+    """The directive and the file are a PAIR. Either alone is worse than neither."""
+    conf = NGINX_CONF.read_text()
+    assert 'error_page 500 502 503 504 /50x.html;' in conf, (
+        'nginx no longer maps 5xx to an error page'
+    )
+
+    block = re.search(r'location = /50x\.html \{(.*?)\}', conf, flags=re.S)
+    assert block, 'the /50x.html location is gone, so the error_page has nowhere to go'
+    assert 'root /app/web' in block.group(1), (
+        'the 5xx page is rooted outside /app/web, where the repo does not put '
+        'it — it pointed at the distro web root once, and every 5xx became a '
+        '404 serving the whole app shell'
+    )
+    assert (WEB / '50x.html').exists(), (
+        'config/nginx.conf promises /50x.html and web/ does not contain it; a '
+        '5xx will fall through to error_page 404 and serve the application'
+    )
+
+
+def test_the_5xx_page_is_internal():
+    """Otherwise it is a URL anyone can fetch and get a 200 error page from."""
+    block = re.search(r'location = /50x\.html \{(.*?)\}', NGINX_CONF.read_text(), flags=re.S)
+    assert block and 'internal;' in block.group(1), (
+        'the 5xx page is directly requestable, so it can report an error that is not happening'
+    )
+
+
+def test_the_5xx_page_depends_on_nothing_it_may_not_get():
+    """It renders when something is already broken, so it cannot need /assets/.
+
+    Comments stripped first. The page's own comment explains why it must not
+    reference `/assets/`, and that prose contains the string — so the unstripped
+    assertion judged the note about the rule instead of the rule. The same trap
+    `test_tray_presentation` records for `aria-live`.
+    """
+    page = re.sub(r'<!--.*?-->', '', (WEB / '50x.html').read_text(), flags=re.S)
+    assert 'rel="stylesheet"' not in page, (
+        'the 5xx page links a stylesheet; if nginx is failing it may not be served'
+    )
+    for external in ('/assets/', 'http://', 'https://'):
+        assert external not in page, (
+            f'the 5xx page references {external}, which it cannot rely on reaching'
+        )
+
+
+def test_the_5xx_page_is_not_precached(sw):
+    """A cached copy would answer for a server that never spoke.
+
+    The rule the whole cache policy turns on: a response the server actually
+    returned is never replaced by a cached one, and a 5xx IS the server
+    speaking.
+    """
+    assert "'/50x.html'" not in sw, (
+        'the 5xx page is in the service worker; it must be served by nginx with '
+        'the real status, never handed back from a cache'
+    )
