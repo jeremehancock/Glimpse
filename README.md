@@ -33,28 +33,6 @@ A sleek, responsive web application for browsing and viewing your Plex, Jellyfin
 - **Dockerized**: Easy deployment with Docker and Docker Compose
 - **Customizable**: Configure update schedule, app title, and more
 - **Installable as PWA**: Access your media library like a native app on any device
-- **Works Offline**: After one successful load, browse your library with no connection
-
-## 📴 Offline access
-
-Once a device has loaded Glimpse successfully at least once, it keeps working
-when your server is out of reach — on a phone away from home, or while the
-container is down for an upgrade. The library you last saw is what you get, and
-the header says **Offline — showing saved library** for as long as that is true.
-The moment your server is reachable again, Glimpse reloads and the notice
-disappears.
-
-A few things worth knowing:
-
-- **The first load has to succeed.** A device that has never reached your server
-  has nothing saved, and shows an offline page instead.
-- **Your library is stored in the browser.** Titles, summaries and artwork are
-  kept in the browser's cache on each device you use, so they are readable there
-  without a connection. Clearing site data removes them.
-- **A server that answers is always believed.** If your container is up but
-  broken, Glimpse shows you that error rather than quietly serving the last copy
-  that worked — you should never be left guessing whether what you are looking
-  at is real.
 
 ## ❤️ Support this project
 

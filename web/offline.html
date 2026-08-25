@@ -19,20 +19,15 @@
       is correct here — a themed page is better than an unstyled one, and being
       offline is not the moment to report a configuration error.
 
-      WHEN THIS PAGE APPEARS, and why the copy says what it says. Since
-      `serve-the-library-offline` the app caches the configuration and the
-      library snapshots as it receives them, so a device that has loaded Glimpse
-      successfully once opens offline and browses its saved library — it never
-      gets here. What is left is the one case that has nothing to fall back to:
-      a device opening Glimpse for the first time, with no network.
+      WHEN THIS PAGE APPEARS. Only when the service worker is installed, the
+      network is unreachable, AND the page being asked for is not in the cache —
+      a route the user has never visited, typically. A device with no worker yet
+      gets the browser's own error page instead, and nothing here can change
+      that.
 
-      So this page must not say "Glimpse needs a connection", which is what it
-      used to say and is no longer true. It says the narrower thing: this device
-      has nothing saved yet, and connecting once is what fixes that for good.
-
-      This page is now hard to reach by accident, which is exactly how the copy
-      inlined in sw.js went stale and started showing Plex orange to Jellyfin
-      installs. Test it deliberately, from a fresh profile with the network off.
+      That makes this the part of the worker nothing exercises by accident,
+      which is exactly how the copy that used to be inlined in sw.js went stale
+      and started showing Plex orange to Jellyfin installs. Test it on purpose.
     -->
     <script>
         (function () {
@@ -84,12 +79,6 @@
         p {
             font-size: 18px;
             line-height: 1.6;
-            margin-bottom: 16px;
-        }
-
-        .hint {
-            font-size: 15px;
-            color: #aaa;
             margin-bottom: 30px;
         }
 
@@ -120,8 +109,7 @@
     <div class="container">
         <div class="icon">📶</div>
         <h1>You're Offline</h1>
-        <p>This device hasn't loaded your library yet, so there's nothing saved to show.</p>
-        <p class="hint">Connect to your Glimpse server once and it will keep working offline after that.</p>
+        <p>It looks like you're not connected. Glimpse needs to reach your server to show your library.</p>
         <button onclick="window.location.reload()">Try Again</button>
     </div>
 </body>

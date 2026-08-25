@@ -144,32 +144,12 @@ it.
   silent fallback recreates the exact failure this project spent years on: a
   misconfigured install that looks like a working one, quietly showing the wrong
   library — or an empty one indistinguishable from a server with no media.
-  - **There is exactly one exception, and its boundary is the whole of it: an
-    UNREACHABLE container may be answered from the last configuration it gave
-    this client.** Last-received is not a default. Nothing is invented, nothing
-    is inferred from the environment or the URL, and a client that never loaded
-    successfully still reports. The table that decides it:
-
-    | | Source | Allowed |
-    | --- | --- | --- |
-    | Default | Invented by the app | **No** |
-    | Inferred | Guessed from environment or URL | **No** |
-    | Missing / malformed | The server answered, badly | **Reported** |
-    | Last received | This container told this client, earlier | **Yes** |
-
-    The exception exists so an installed PWA opens away from its network. It is
-    narrow because the failure the rule guards against needs the app to make
-    something up, and a copy of what this container actually said is not that.
-  - **A server that answers is always believed — a cached copy never stands in
-    for a status the server produced.** This is load-bearing, not tidiness. A
-    container whose entrypoint failed *answers*; it does not vanish. Serving the
-    last configuration that worked over its 500 hides a broken install behind a
-    working-looking one, which is the same failure reached from the other side.
-    A status is the server speaking; the absence of a status is the network.
-    That distinction is invisible on a working network and only shows up on the
-    day something is broken, so `tests/test_offline_capability.py` pins it by
-    shape: no strategy in `sw.js` may read a cache inside its `try`. Cache reads
-    belong before the fetch or in the `catch`, and nowhere else.
+  - **There is no exception, and one was tried.** `serve-the-library-offline`
+    briefly retained the last configuration so an installed app could open away
+    from its network. It was reverted: the app cannot tell the user whether what
+    they are looking at is current, and showing a library that might be out of
+    date is the same ambiguity this rule exists to refuse. If it comes back it
+    is a product decision, not a wiring one.
 - **`Dockerfile` copies `scripts/` as a directory, not file by file.** The
   per-file list silently omitted `glimpse_config.py` when it was added, and the
   container refused to start at runtime rather than failing the build. A
@@ -322,46 +302,40 @@ it.
   broken, which is indistinguishable from a regression until you compare the
   served bytes against the repo. `/images/` and `/data/` keep their 7-day cache;
   they are genuinely static.
-- **The app works offline after its first successful load, and says so while it
-  does.** Artwork is already stale-while-revalidate, which is why a cached
-  snapshot renders with its posters rather than as a grid of gaps. Do not make
-  artwork cache-first or network-first — that is the leg the other two rest on.
-  - **The configuration and the snapshots are retained by two different
-    mechanisms, and unifying them is not possible.** The worker caches the
-    snapshots, which are read with `fetch()`. The page retains `config.json`
-    itself, in `localStorage`, because **a browser dispatches no fetch event for
-    a synchronous XHR** — and the boot read is a synchronous XHR, since the
-    theme must be on `<html>` before first paint. The worker never sees that
-    request. It cannot cache it and could not answer it.
-
-    This is the single most expensive thing on this page to rediscover. It is
-    invisible on every online load: the app works, the snapshots cache, the
-    tests pass, and only a real browser with the container stopped shows the
-    configuration error. It was found that way and no other way.
-
-    So the worker has a route for `config.json` that neither reads nor writes a
-    cache. That is deliberate — an entry nothing can read back is live code that
-    cannot succeed, which is the exact defect this whole change removed. The
-    route exists only to keep `config.json` off the cache-first fallback.
-
-  Caching the configuration alone would be worse than the error it replaces: the
-  app starts, knows which server it is browsing, and shows an empty grid, which
-  is indistinguishable from a library with no items. The two are cached together
-  or not at all.
-
-  The indicator is part of the contract, not polish. A library quietly out of
-  date is the same class of failure as one quietly wrong — the user reads a
-  missing recent addition as the fetcher being broken. It lives in the header
-  because a dismissible notice about stale data is one that gets dismissed and
-  then forgotten, it carries text rather than only a colour, and it reports
-  current state: reaching the container again reloads the snapshots and clears
-  it, rather than leaving a flag that was set once at boot.
-- **The offline page exists once, in `web/offline.html`, and it is now reached
-  only by a device that has never loaded successfully.** `sw.js` used to carry a
-  second copy inlined as a template literal, with the Plex palette hardcoded; it
-  had already gone stale against the themed original. Cache the file, never
-  inline it — and test it deliberately from a fresh profile, because nothing
-  else exercises it any more and that is exactly how the inlined copy rotted.
+- **The service worker is here for SPEED, not for offline browsing.** Artwork is
+  stale-while-revalidate and the app's own assets are network-first with a cache
+  fallback, so a repeat visit paints without waiting on round trips. **The
+  library data — `config.json` and `/data/*.json` — is never cached, in either
+  direction.**
+  - **Never add a cache fallback to the data routes.** A stale grid is
+    indistinguishable from a current one and an empty grid is indistinguishable
+    from a library with no items; the app cannot tell the user which they are
+    looking at, so it does not show them something that might be wrong. If that
+    is ever revisited, it is a product decision, not a wiring one.
+  - **Never write the data to a cache "for later" either.** That is how the
+    original defect read: `/config.json` and the snapshots were fetched with a
+    `caches.match()` fallback against a cache nothing ever populated. The line
+    read correctly and had never once returned anything — live code that cannot
+    succeed, which is worse than no code because it looks like a working feature
+    to everyone who reads it.
+  - **`config.json` cannot be cached by the worker even if you want it to.** The
+    boot read is a synchronous XHR, and a browser dispatches no fetch event for
+    one, so the worker never sees that request. Measured, not assumed. Without
+    knowing this, "just cache config.json too" looks like a one-line change.
+- **A response the server actually returned is never replaced by a cached one.**
+  Only a fetch that THREW may be answered from cache. A status is the server
+  speaking; the absence of a status is the network. A container whose entrypoint
+  failed *answers* — serving the last response that worked over its 500 hides a
+  broken install behind a working-looking one, which is this project's oldest
+  failure mode reached from a new direction. `tests/test_cache_policy.py` pins
+  it by shape: no strategy may read a cache inside its `try`. Cache reads belong
+  before the fetch or in the `catch`, and nowhere else.
+- **The offline page exists once, in `web/offline.html`.** `sw.js` used to carry
+  a second copy inlined as a template literal, with the Plex palette hardcoded;
+  it had already gone stale against the themed original. Cache the file, never
+  inline it. It is reached only when the worker is installed, the network is
+  gone, and the requested page is not cached — rare enough that nothing
+  exercises it by accident, which is exactly how the inlined copy rotted.
 - **A control is switched off with `aria-disabled`, never the `disabled`
   attribute, and every such binding needs a guard at the action.** The attribute
   drops a control out of the tab order, so a keyboard user is not told it is

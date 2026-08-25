@@ -18,8 +18,8 @@
 // as a fixed bug still being broken, and cost a full diagnostic pass to tell
 // apart from a real regression. The strategy change below is the actual fix;
 // this bump is what evicts the entries already poisoned.
-const CACHE_NAME = 'glimpse-media-viewer-v8.2';
-const DYNAMIC_CACHE = 'glimpse-media-dynamic-v8.2';
+const CACHE_NAME = 'glimpse-media-viewer-v8.3';
+const DYNAMIC_CACHE = 'glimpse-media-dynamic-v8.3';
 
 // Assets to cache on install.
 //
@@ -114,26 +114,18 @@ function isAppShellRequest(request) {
 }
 
 /* The generated configuration. Always the network, never a cache, in either
- * direction — and THIS WORKER IS NOT WHAT MAKES IT AVAILABLE OFFLINE.
+ * direction.
  *
- * A browser does not dispatch a fetch event for a synchronous XHR, and the boot
- * read in index.html is a synchronous XHR — parser-blocking, because the theme
- * has to be on <html> before first paint. So this handler never sees that
- * request: it cannot cache it, and it could not answer it from a cache if it
- * had one. Measured rather than assumed; an async fetch() of the same URL does
- * go through here, which is what makes the gap easy to miss.
- *
- * The page therefore retains its own configuration, in localStorage, which is
- * the only same-origin store that can be read before first paint. One offline
- * story, two mechanisms, because no single mechanism covers both halves.
- *
- * What this route IS for: keeping config.json off the cache-first fallback at
- * the bottom of the fetch handler. It does not live under /data/, so without an
+ * This route exists to keep config.json off the cache-first fallback at the
+ * bottom of the fetch handler. It does not live under /data/, so without an
  * explicit branch it would be served cache-first, and a container restart with
  * new settings would never be seen by an installed client. That is why the
- * check has to come before the static-asset branch, and why the strategy is
- * network-only rather than the one the snapshots use — a cache this worker can
- * never fill has no business being consulted.
+ * check comes before the static-asset branch.
+ *
+ * Worth knowing if you ever try to cache it: the boot read in index.html is a
+ * SYNCHRONOUS XHR, and a browser dispatches no fetch event for one. This worker
+ * never sees that request. It could not answer it from a cache however hard it
+ * tried, and an entry written here would be read by nobody.
  */
 function isConfigRequest(request) {
   return new URL(request.url).pathname === '/config.json';
@@ -148,19 +140,21 @@ function isConfigRequest(request) {
 // apart with nothing to signal it.
 //
 // They stay in STATIC_ASSETS and are still precached on install, so the cache
-// fallback has them when the network is gone. That is the branch that matters
-// for an offline-capable PWA — alpine.min.js is vendored rather than fetched
-// from a CDN for precisely this reason, and it is still there.
+// fallback has them when the network drops or stalls. That is what keeps the
+// interface painting instantly on a repeat visit instead of waiting on a round
+// trip — and alpine.min.js is vendored rather than fetched from a CDN so it is
+// covered by the same fallback.
 function isAppAssetRequest(request) {
   return new URL(request.url).pathname.startsWith('/assets/');
 }
 
 // The library snapshots the fetchers write on a cron schedule.
 //
-// Fetched fresh for the same reason config.json is, and cached for the same
-// reason too: a configuration with no snapshot to go with it starts the app
-// offline and shows it an empty grid, which is indistinguishable from a library
-// with no items — an ambiguity this project already treats as a defect.
+// Never cached, for the same reason config.json is not: this is how the app
+// learns the library changed, and a stale grid is indistinguishable from a
+// current one. The ARTWORK those snapshots point at is cached hard — that is
+// what makes a repeat visit fast, and it costs nothing in freshness because a
+// poster is only rewritten when its MD5 changes.
 function isJsonDataRequest(request) {
   return request.url.includes('/data/') && request.url.endsWith('.json');
 }
@@ -198,20 +192,21 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // The library snapshots - the same strategy as the configuration, so a client
-  // that can start offline also has something to show.
+  // The library snapshots - the same strategy as the configuration. Both are
+  // how the app learns what the library currently is, so neither is ever
+  // answered from a cache.
   if (isJsonDataRequest(event.request)) {
-    event.respondWith(networkOnlyWithOfflineFallback(event.request));
+    event.respondWith(networkOnlyStrategy(event.request));
     return;
   }
 
   /* Artwork - stale-while-revalidate, and leave it that way.
    *
-   * This is not a performance nicety any more, it is what makes an offline
-   * start worth having: a cached snapshot renders with its posters instead of
-   * as a grid of gaps. Artwork is addressed by a stable path and re-downloaded
-   * by the fetchers only when its MD5 changes, so serving the held copy while
-   * revalidating is exactly right for it. */
+   * This is the single biggest thing making a repeat visit feel instant: the
+   * grid paints from cache and revalidates behind it, so a library of thousands
+   * of posters costs no round trips to display. Artwork is addressed by a
+   * stable path and re-downloaded by the fetchers only when its MD5 changes, so
+   * the held copy is almost always the right one. */
   if (isImageDataRequest(event.request)) {
     event.respondWith(staleWhileRevalidateStrategy(event.request));
     return;
@@ -221,60 +216,20 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(cacheFirstStrategy(event.request));
 });
 
-/* Options for reading a cached copy back.
+/* Write a successful response to the cache. Successful only — an error stored
+ * here becomes the copy every later cache hit is served, on every load, until
+ * something evicts it.
  *
- * `ignoreVary` because nginx has `gzip_vary on`, so every JSON response over a
- * kilobyte carries `Vary: Accept-Encoding`. Cache matching honours that by
- * default, which means a stored copy only answers a request whose
- * Accept-Encoding matches the one that fetched it. Those are the same browser
- * and normally do match — right up until they don't, and then the offline start
- * silently degrades into the configuration error this change exists to remove.
- * The URL is the whole identity of these files; the encoding is not part of it.
- */
-const CACHE_MATCH_OPTIONS = { ignoreVary: true };
-
-// The header that tells the page a response came from the cache rather than
-// from the container. Read by the app to decide whether to show that it is
-// running on saved data.
-const FROM_CACHE_HEADER = 'X-Glimpse-From-Cache';
-
-/* Re-wrap a cached response so the page can tell it apart from a live one.
- *
- * By the time a Response reaches the app it looks exactly like one the server
- * sent; this is the only place that knows otherwise. A header carries the fact
- * across without a second channel that has to be kept in step with this one.
- *
- * Rebuilt rather than mutated because a Response handed back by the Cache API
- * has an immutable headers guard, so setting a header on it throws. Buffered
- * rather than streamed because the first consumer is the parser-blocking
- * synchronous XHR in index.html, and these files are small.
- */
-async function markAsCached(response) {
-  const headers = new Headers(response.headers);
-  headers.set(FROM_CACHE_HEADER, '1');
-  return new Response(await response.blob(), {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
-  });
-}
-
-/* Write a successful response to the cache that answers when the network is
- * gone. Successful only — an error or a malformed body must never become the
- * copy a later offline start is given.
- *
- * DYNAMIC_CACHE rather than CACHE_NAME, deliberately. This is received data,
+ * DYNAMIC_CACHE rather than CACHE_NAME, deliberately. This is received content,
  * not part of the precached shell, and the activate handler only spares the two
  * current names — so a cache-name bump evicts these alongside the assets they
- * belong with. Data that outlived a bump would be its own staleness bug, of
+ * belong with. Content that outlived a bump would be its own staleness bug, of
  * exactly the kind the v8.1 -> v8.2 note above describes.
  *
  * GET only, because the Cache API refuses to store a response to any other
- * method and throws rather than declining. This strategy serves requests the
- * app makes, so the guard is what keeps a future non-GET from turning a working
- * fetch into a rejected promise.
+ * method and throws rather than declining.
  */
-async function cacheForOfflineUse(request, response) {
+async function cacheSuccessfulResponse(request, response) {
   if (request.method !== 'GET') {
     return;
   }
@@ -282,20 +237,30 @@ async function cacheForOfflineUse(request, response) {
   await cache.put(request, response);
 }
 
-/* The network, and nothing but. Serves /config.json.
+/* The network, and nothing but. Serves /config.json and the library snapshots.
  *
- * No cache read and no cache write, and both absences are the point rather than
- * an omission. The boot read of this file is a synchronous XHR that never
- * reaches this worker (see isConfigRequest), so a cache entry written here
- * could never be served to the one caller that matters — and live code that
- * cannot succeed is the exact shape of the defect this change removed. The
- * page retains its own copy; this route only keeps config.json off the
- * cache-first fallback.
+ * No cache read and no cache write, and BOTH absences are deliberate.
  *
- * Its one rule is the shared one: whatever the container says is what the app
- * gets, and if the container says nothing the failure propagates. */
+ * No read, because a stale library must never be presented as a live one. When
+ * the container cannot be reached the app says so and shows nothing, which is
+ * the whole point: an empty grid is indistinguishable from a library with no
+ * items, and a stale grid is indistinguishable from a current one. The user
+ * cannot tell either apart, so neither is offered.
+ *
+ * No write, because nothing would ever read it back. A cache entry that cannot
+ * be served is live code that cannot succeed — which is precisely the defect
+ * this route used to have: it fell back to `caches.match()` on failure, against
+ * a cache nothing ever populated, so the fallback read correctly and had never
+ * once returned anything.
+ *
+ * ARTWORK IS THE EXCEPTION AND IT IS THE POINT. Posters are cached hard (see
+ * staleWhileRevalidateStrategy) because they are addressed by a stable path and
+ * only rewritten when their MD5 changes. That is what makes the grid paint
+ * instantly on a repeat visit. The DATA is what must stay fresh; the pictures
+ * it points at need not be re-fetched to be correct.
+ */
 async function networkOnlyStrategy(request) {
-  console.log('Fetching configuration:', request.url);
+  console.log('Fetching fresh data:', request.url);
   return fetch(request, {
     cache: 'no-store', // Bypass all caches
     headers: {
@@ -304,67 +269,6 @@ async function networkOnlyStrategy(request) {
       Expires: '0',
     },
   });
-}
-
-/* Network-only, with the last copy this client received as an OFFLINE fallback.
- *
- * Serves the library snapshots — what the app renders once it knows which
- * server it is browsing.
- *
- * The distinction it draws is the whole of this strategy, and it is invisible
- * on a working network:
- *
- *   fetch() throws        the request never reached the container. The network
- *                         is what failed and the server said nothing, so the
- *                         last copy this client received may answer.
- *   fetch() returns !ok   the container ANSWERED, and what it said was that
- *                         something is wrong. That answer is returned as-is.
- *   fetch() returns ok    returned, and written to the cache so the first
- *                         branch has something to serve later.
- *
- * A status is the server speaking; the absence of a status is the network.
- *
- * This used to fall back to cache on ANY non-OK response, which was inert only
- * because nothing ever populated the cache. Populating it — which is the rest
- * of this change — turns that line into a mechanism for hiding a container
- * whose entrypoint failed behind the last configuration that worked. That is
- * the oldest failure mode in this project, reached from a new direction, and it
- * is why the split is a spec requirement rather than an implementation detail.
- *
- * NOT called alwaysFreshStrategy any more. It answers from cache now, so that
- * name had stopped being true, and a name that lies is how the next person
- * reintroduces the bug.
- */
-async function networkOnlyWithOfflineFallback(request) {
-  try {
-    console.log('Fetching fresh data:', request.url);
-    const response = await fetch(request, {
-      cache: 'no-store', // Bypass all caches
-      headers: {
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-        Pragma: 'no-cache',
-        Expires: '0',
-      },
-    });
-
-    if (response.ok) {
-      console.log('Fresh data fetched successfully:', request.url);
-      await cacheForOfflineUse(request, response.clone());
-      return response;
-    }
-
-    // The container answered. Return what it said, whatever it said. Do not
-    // look in the cache here — see the note above.
-    console.log('Server answered with', response.status, 'for', request.url);
-    return response;
-  } catch (error) {
-    console.log('Container unreachable, trying cache:', request.url);
-    const cachedResponse = await caches.match(request, CACHE_MATCH_OPTIONS);
-    if (cachedResponse) {
-      return markAsCached(cachedResponse);
-    }
-    throw error;
-  }
 }
 
 // Stale-while-revalidate strategy for images
@@ -434,7 +338,7 @@ async function networkFirstWithCacheFallback(request) {
 
     if (networkResponse.ok) {
       // Update cache with fresh themed content
-      await cacheForOfflineUse(request, networkResponse.clone());
+      await cacheSuccessfulResponse(request, networkResponse.clone());
       return networkResponse;
     }
 
@@ -477,7 +381,7 @@ async function cacheFirstStrategy(request) {
     const networkResponse = await fetch(request);
     // Cache successful responses for next time
     if (networkResponse.ok) {
-      await cacheForOfflineUse(request, networkResponse.clone());
+      await cacheSuccessfulResponse(request, networkResponse.clone());
     }
     return networkResponse;
   } catch (error) {

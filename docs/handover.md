@@ -25,8 +25,8 @@ log. Delete it when the rewrite lands.
 `make check` is green (157 tests). CI is green on `dev`.
 
 > **As of 2026-08-25, every change in flight is code-complete and the only task
-> left in each is ":dev validation".** `serve-the-library-offline` was applied
-> that evening and is committed with this note; the two before it —
+> left in each is ":dev validation".** `cache-for-speed-not-for-offline` was
+> applied that evening and is committed with this note; the two before it —
 > `fix-overlay-layering-and-dead-tray-controls` (44/45) and
 > `restyle-tray-controls` (37/38) — were committed earlier the same day.
 > Nothing has been archived, because archiving rewrites `openspec/specs/` and
@@ -50,10 +50,9 @@ task: validate the `:dev` image. Nothing may be archived until that happens,
 because archiving rewrites `openspec/specs/` — which is still empty, since no
 change in this repo has ever been archived.
 
-- **`serve-the-library-offline`** — 37/38. Only "validate `:dev`" remains, and
-  for this one that validation must be done **offline**, which is the one thing
-  that cannot be checked by looking at the app on a working network. See item 4
-  of the punch list.
+- **`cache-for-speed-not-for-offline`** — 37/38. Only "validate `:dev`"
+  remains. Formerly `serve-the-library-offline`; see item 4 of the punch list
+  for why it changed direction.
 - **`fix-overlay-layering-and-dead-tray-controls`** — 44/45.
 - **`restyle-tray-controls`** — 37/38.
 - **`replace-boot-time-html-rewriting`** — 50/51. Only "validate `:dev`" remains.
@@ -123,7 +122,7 @@ a separate phone drawer, is now one implementation.
    replaced. They are served from `main`, so they will not look wrong to anyone
    until the rewrite merges, and then all six will at once. This needs a real
    media library, so it is a release-time task rather than a per-change one.
-5. **Then** archive all three changes, bump `VERSION` past `1.3.0`, and reopen
+5. **Then** archive all six changes, bump `VERSION` past `1.3.0`, and reopen
    the `main` bootstrap (below).
 
 ---
@@ -309,29 +308,34 @@ most likely to undo this quietly".
 ### 4. Verify the PWA caches properly — **DONE, pending `:dev`**
 
 Asset freshness was fixed earlier (see the caching table in
-[CLAUDE.md](../CLAUDE.md)). `serve-the-library-offline` then closed the rest: the
-app had never worked offline at all, because `config.json` and the snapshots used
-a cache fallback nothing ever populated. Verified 30/30 in a real browser at
-1280px and 390px against a container seeded with 400 movies and 250 shows, by
-**stopping the container** rather than emulating a network condition — a stopped
-container is a genuine `fetch()` throw, which is the case the whole change turns
-on.
+[CLAUDE.md](../CLAUDE.md)). `cache-for-speed-not-for-offline` finished the job.
+Measured against a 400-item library by reading the container's own nginx access
+log — **a repeat visit requests zero posters** and paints its grid from cache,
+while the library data is fetched every time.
 
-**The trap it uncovered, and the reason to read this before touching `sw.js`:**
-a browser dispatches **no fetch event for a synchronous XHR**, and the boot read
-of `config.json` is one, because the theme must be on `<html>` before first
-paint. The service worker therefore cannot cache that request or answer it. So
-the snapshots live in the worker's cache and the configuration is retained by the
-page in `localStorage` — two mechanisms, because no single one covers both.
+**This change reversed direction mid-flight, and the reversal is the point.** It
+started as `serve-the-library-offline` and made the app fully offline-capable —
+snapshots cached, configuration retained, a "showing saved library" badge. That
+was built and verified 30/30, then withdrawn: the user does not want a possibly
+stale library displayed when the container is stopped, and the punch-list item
+was always a question about *speed*. What survived is the part that was always
+worth doing — deleting a cache fallback that had never once returned anything,
+and stopping any error response being answered from cache.
 
-This is invisible on every online load. The first implementation cached the
-snapshots correctly, passed lint, passed 154 tests, and *still* showed "Glimpse
-is not configured" with the network gone. Only a real browser with the container
-stopped found it. Do not "simplify" the two mechanisms back into one.
+**Two findings from the withdrawn work are load-bearing. Do not re-derive them:**
 
-Also observed and left alone as out of scope: the container's nginx declares
-`error_page 500 502 503 504 /50x.html` but ships no `50x.html`, so every 5xx is
-rewritten to a 404.
+- A browser dispatches **no fetch event for a synchronous XHR**, and the boot
+  read of `config.json` is one. The service worker never sees that request and
+  cannot cache or answer it. "Just cache config.json too" is not a one-line
+  change; it is impossible from the worker.
+- The container's nginx declares `error_page 500 502 503 504 /50x.html` but ships
+  no `50x.html`, so every 5xx it generates is rewritten to a 404. Out of scope,
+  worth knowing.
+
+Also worth knowing: behind a **reverse proxy**, a stopped container makes the
+proxy return 502/504 rather than the connection being refused — the network
+failing, reported as a status. Harmless now, since the data routes never consult
+a cache. It would matter to anyone who reintroduces offline support.
 
 ### 5. Animate the movies/TV swipe
 

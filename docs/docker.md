@@ -126,17 +126,15 @@ Four things in `config/nginx.conf` are load-bearing:
 - **`location = /config.json`** with `no-store` — a restart with new settings has
   to take effect on the next load, not whenever a cached copy expires.
 
-  `no-store` here and the app's offline support are not in conflict, and the
-  header is not a mistake to be "fixed" now that Glimpse works offline. The
-  service worker does **not** cache this file — it never even sees the request,
-  because the boot read is a synchronous XHR and browsers dispatch no fetch
-  event for one. The page retains its own copy in `localStorage` instead, and
-  uses it only when the container cannot be reached at all.
+  Nothing caches this file anywhere else, and that is deliberate. The service
+  worker fetches it network-only — it neither reads nor writes a cache for it —
+  so `no-store` here is the whole policy rather than half of one.
 
-  So `no-store` governs exactly what it should: the browser's HTTP cache, which
-  must never answer a request the container could have answered. A container
-  that answers, with anything including a 500, is always believed. See
-  `isConfigRequest` in `web/sw.js`, which says all of this at the route.
+  Worth knowing before trying to cache it: the boot read in `web/index.html` is
+  a **synchronous XHR**, and a browser dispatches no fetch event for one. The
+  worker never sees that request and could not answer it from a cache however
+  hard it tried. Measured, not assumed.
+
 - **`location = /sw.js`** with `no-cache` — the exact match is what outranks the
   `\.(css|js|…)$` regex below it, which used to hand the service worker a 7-day
   cache. That is the worst file here to hold: it is the code that decides what
