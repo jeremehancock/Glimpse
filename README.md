@@ -1,22 +1,10 @@
- d# 🎬 Glimpse Media Viewer
+# 🎬 Glimpse Media Viewer
 
 A sleek, responsive web application for browsing and viewing your Plex, Jellyfin, or Emby media library content. This dockerized solution fetches metadata and artwork from your media server and presents it in an elegant, user-friendly interface with support for multiple media servers.
 
-![Glimpse Media Viewer Plex Main](https://raw.githubusercontent.com/jeremehancock/Glimpse/main/assets/screenshot-main-plex-2.png)
-
-![Glimpse Media Viewer Plex Details](https://raw.githubusercontent.com/jeremehancock/Glimpse/main/assets/screenshot-details-plex-2.png)
-
-![Glimpse Media Viewer Jellyfin Main](https://raw.githubusercontent.com/jeremehancock/Glimpse/main/assets/screenshot-main-jellyfin-2.png)
-
-![Glimpse Media Viewer Jellyfin Details](https://raw.githubusercontent.com/jeremehancock/Glimpse/main/assets/screenshot-details-jellyfin-2.png)
-
-![Glimpse Media Viewer Emby Main](https://raw.githubusercontent.com/jeremehancock/Glimpse/main/assets/screenshot-main-emby-2.png)
-
-![Glimpse Media Viewer Emby Details](https://raw.githubusercontent.com/jeremehancock/Glimpse/main/assets/screenshot-details-emby-2.png)
-
 ## ✨ Features
 
-- **Modern Interface**: Clean, responsive design that works on mobile and desktop
+- **Modern Interface**: Clean, responsive design that works on mobile and desktop — menus and details open as app-style trays on phones, swipe down to dismiss
 - **Multi-Server Support**: Connect to Plex, Jellyfin, Emby, or multiple servers simultaneously
 - **Media Browsing**: View your Movies and TV Shows with poster art
 - **Search Capability**: Quickly find content across your libraries
@@ -215,7 +203,7 @@ Exclusion lists are comma-separated and can include library names or IDs:
 ### Server Configuration Notes
 
 - **Single Server**: Configure only one server's credentials. The app will automatically detect and use the available server.
-- **Multi-Server**: Configure credentials for any combination of servers. The app will show a dropdown to switch between servers.
+- **Multi-Server**: Configure credentials for any combination of servers. With two, the app shows a toggle; with three, a switcher tray. Each server also has its own URL (`/plex/`, `/jellyfin/`, `/emby/`).
 - **Primary Server**: When multiple servers are configured, `PRIMARY_SERVER` determines which one is shown by default and affects the app's theme.
 - **Automatic Detection**: If `PRIMARY_SERVER` is set incorrectly or credentials are missing, the app will automatically detect and switch to an available server.
 - **Clean Data Updates**: When libraries are excluded, the fetchers automatically clean existing data files to ensure excluded content doesn't persist.
@@ -264,14 +252,26 @@ Glimpse/
 │
 ├── docker-compose.yml        # Docker Compose configuration
 ├── Dockerfile                # Docker build configuration
+├── VERSION                   # Drives the pinned image tag, git tag, and Release
+├── Makefile                  # Quality gates (make lint / make test / make check)
+│
+├── docs/
+│   ├── development-workflow.md  # Branches, releases, and the OpenSpec flow
+│   └── docker.md                # The image, the entrypoint, the smoke test
+│
+├── tests/                    # pytest
+├── openspec/                 # Capability specs and in-flight changes
 │
 ├── scripts/
+│   ├── glimpse_config.py     # Resolves the environment into config.json at startup
 │   ├── plex_data_fetcher.py  # Python script to fetch Plex data
 │   └── jellyfin_data_fetcher.py # Python script to fetch Jellyfin/Emby data
 │
 ├── web/
 │   ├── index.html            # Frontend web interface
-│   ├── manifest.json         # PWA manifest file
+│   ├── assets/               # Overlay system (trays, dialogs) + vendored Alpine.js
+│   ├── config.json           # Generated at startup — not in the repo
+│   ├── manifest.json         # PWA manifest (regenerated at startup per server)
 │   ├── sw.js                 # Service worker for PWA functionality
 │   ├── offline.html          # Offline fallback page
 │   └── images/               # Icons and images
@@ -282,7 +282,7 @@ Glimpse/
 │       ├── favicon.ico                 # Favicon
 │       ├── favicon-16x16.png           # Favicon (16x16)
 │       ├── favicon-32x32.png           # Favicon (32x32)
-│       ├── icons/                      # Server icons for dropdown menus
+│       ├── icons/                      # Server icons for the switcher
 │       │   ├── plex.png                # Plex server icon
 │       │   ├── jellyfin.png            # Jellyfin server icon
 │       │   └── emby.png                # Emby server icon
@@ -327,11 +327,12 @@ Glimpse/
 2. **Library Filtering**: Excluded libraries are automatically skipped during data fetching, and existing data files are cleaned to ensure consistency.
 3. **Multi-Server Support**: When multiple servers are configured, data is fetched separately and stored in server-specific directories.
 4. **Image Processing**: Media posters and backdrops are downloaded, with MD5 checksums to avoid re-downloading unchanged files.
-5. **Theming**: The interface automatically adapts its theme based on your primary server (Plex orange/yellow, Jellyfin blue, or Emby green).
-6. **Server Switching**: If multiple servers are configured, users can switch between them with a dropdown menu.
-7. **Web Server**: Nginx serves the static web interface and the downloaded data.
-8. **Scheduled Updates**: Cron runs the data fetchers on the configured schedule to keep content up-to-date.
-9. **Persistence**: All data is stored in volumes mapped to your host, ensuring it persists between container restarts.
+5. **Configuration**: At startup the container resolves your environment into `config.json`, which the interface reads once when it loads. Your web files are never modified.
+6. **Theming**: The interface automatically adapts its theme based on your primary server (Plex orange/yellow, Jellyfin blue, or Emby green).
+7. **Server Switching**: If multiple servers are configured, users can switch between them — a toggle for two servers, a menu for three. Each server also has its own URL: `http://your-server:9090/plex/`, `/jellyfin/`, or `/emby/`, which you can bookmark.
+8. **Web Server**: Nginx serves the static web interface and the downloaded data.
+9. **Scheduled Updates**: Cron runs the data fetchers on the configured schedule to keep content up-to-date.
+10. **Persistence**: All data is stored in volumes mapped to your host, ensuring it persists between container restarts.
 
 ## 🌐 Customization
 
@@ -451,6 +452,18 @@ docker exec glimpse-media-viewer bash -c 'python /app/scripts/jellyfin_data_fetc
 
 If you see the default Nginx welcome page, there might be an issue with the configuration:
 
+Check that the container finished starting. Nginx serves pages whether or not startup completed, so this file — written at the end of startup — is the real evidence:
+
+```bash
+curl http://your-server:9090/config.json
+```
+
+If it 404s, read the startup logs:
+
+```bash
+docker logs glimpse-media-viewer
+```
+
 Check if the app files are present
 
 ```bash
@@ -480,19 +493,45 @@ If media images aren't displaying:
 
 #### Server Toggle Not Appearing
 
-If you configured multiple servers but don't see the server dropdown:
+If you configured multiple servers but don't see the server switcher:
 
-1. Verify all server URLs and tokens are correct
-2. Check the container logs for authentication errors
-3. Ensure all servers are accessible from the container
-4. Try restarting the container after fixing configuration
+1. **Check what the container decided.** This is the quickest answer — the app shows a switcher only for the servers listed here:
+
+   ```bash
+   curl http://your-server:9090/config.json
+   ```
+
+   A server is listed only if **both** its URL and its token are set. A URL with no token is treated as unconfigured.
+
+2. Verify all server URLs and tokens are correct
+3. Check the container logs for authentication errors
+4. Ensure all servers are accessible from the container
+5. Try restarting the container after fixing configuration
 
 #### Wrong Theme Colors
 
-If the app shows the wrong theme:
+The theme follows the server you are viewing. If it looks wrong:
 
-1. Check your `PRIMARY_SERVER` setting
-2. Clear your browser cache and reload
+1. **Check the resolved primary server:**
+
+   ```bash
+   curl http://your-server:9090/config.json
+   ```
+
+   If `primaryServer` isn't what you set, the container corrected it because that server had no credentials — the logs say so explicitly:
+
+   ```bash
+   docker logs glimpse-media-viewer | grep PRIMARY_SERVER
+   ```
+
+2. Reload the page
+
+   You should not need to clear anything. As of the version that introduced this
+   note, the app's stylesheets and scripts are revalidated on every load rather
+   than held, so an upgraded container takes effect on the next load. If you are
+   coming from an older version your browser may serve one stale page first —
+   load it a second time and it will correct itself.
+
 3. Un-install and Re-install PWA
 
 #### Library Exclusion Issues
@@ -518,6 +557,42 @@ To get detailed library information for troubleshooting exclusions, check the lo
 ### Using Behind a Reverse Proxy
 
 This application works well behind a reverse proxy like Traefik or Nginx Proxy Manager. Just expose the container port and configure your proxy accordingly.
+
+## 🐳 Docker Images
+
+Images are published to Docker Hub automatically by CI.
+
+| Tag | What it is |
+| --- | --- |
+| `bozodev/glimpse-media-viewer:latest` | Production. Every merge to `main` refreshes it. |
+| `bozodev/glimpse-media-viewer:dev` | The `dev` branch. New work, not yet released — use a throwaway instance. |
+| `bozodev/glimpse-media-viewer:<version>` | A pinned release, e.g. `1.3.0`. Never overwritten once published. |
+| `bozodev/glimpse-media-viewer:sha-<short>` | An immutable build of one commit, handy for rollbacks. |
+
+The compose file above uses `:latest`. Pin a version instead if you would rather
+upgrade deliberately:
+
+```yaml
+image: bozodev/glimpse-media-viewer:1.3.0
+```
+
+## 🧑‍💻 Development
+
+Glimpse is developed spec-first: every capability has an OpenSpec spec before it
+is built. Work happens on `dev`; `main` is release-only.
+
+```bash
+make install     # ruff, pytest + npm ci
+make check       # lint + test — the same gates CI runs on every push
+make fmt         # apply every fix lint would ask for
+make docker-smoke  # build the image and prove the container serves
+```
+
+Nothing in `web/` is built or bundled — nginx serves those files exactly as
+authored, and no Node runs in the image. Node is development tooling only.
+
+See [docs/development-workflow.md](docs/development-workflow.md) for the branch
+and release flow, and [docs/docker.md](docs/docker.md) for the image.
 
 ## 🔐 Security Considerations
 

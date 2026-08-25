@@ -1,0 +1,139 @@
+name: Publish Docker image
+
+# Build and push the multi-arch image to Docker Hub.
+#   push to dev   -> bozodev/glimpse-media-viewer:dev                (testing)
+#   push to main  -> bozodev/glimpse-media-viewer:latest             (production)
+#                    ...and if the VERSION file names a version we haven't
+#                    released yet, also bozodev/glimpse-media-viewer:<VERSION>,
+#                    plus a git tag v<VERSION> and a GitHub Release.
+# Every build also gets an immutable sha-<short> tag. Can be run by hand from
+# the Actions tab.
+#
+# The image name is fixed by docker-compose.yml, which users have a copy of.
+# Renaming it here orphans every install. See CLAUDE.md.
+#
+# Release flow: bump VERSION on dev, validate the :dev image, then merge dev
+# into main — the merge publishes :latest and the pinned version in one step.
+#
+# Publishing is gated on CI: it runs when the CI workflow completes
+# successfully for a commit, never in parallel with it. A red CI publishes
+# nothing. CI is push-only (see ci.yml), so each commit has exactly one CI run
+# and therefore publishes exactly once — no duplicate to race or cancel.
+# workflow_dispatch stays available as a manual override.
+# NOTE: workflow_run reads THIS file from the default branch and its
+# github.ref/github.sha point at the default branch, not the tested commit —
+# so branch and sha below are derived from the workflow_run payload.
+on:
+  workflow_run:
+    workflows: ['CI']
+    types: [completed]
+    branches: [main, dev]
+  workflow_dispatch:
+
+# Serialize publishes for a branch so two never race. A superseding publish
+# queues behind the in-flight one and runs after it, rather than cancelling it —
+# no publish is ever cancelled automatically.
+concurrency:
+  group: docker-publish-${{ github.event.workflow_run.head_branch || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write # create the release tag + GitHub Release on a version bump
+
+jobs:
+  publish:
+    name: Build and push (linux/amd64, linux/arm64)
+    runs-on: ubuntu-latest
+    # Skip on forks (only the source repo has the Docker Hub credentials), and
+    # for the automatic path only publish when CI actually passed AND that CI was
+    # triggered by a push — a pull_request CI run for the same commit must not
+    # spawn a second, racing publish. A manual dispatch deliberately bypasses
+    # both checks.
+    if: >-
+      github.repository_owner == 'jeremehancock' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push'))
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Check out the commit CI tested, not the default branch that
+          # workflow_run resolves github.sha to.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0 # full history + tags, so we can tell if this
+          fetch-tags: true #   VERSION has already been released
+
+      - name: Read version and detect a new release
+        id: ver
+        env:
+          # From the workflow_run payload on the automatic path; from the
+          # dispatched ref on a manual run.
+          BRANCH: ${{ github.event.workflow_run.head_branch || github.ref_name }}
+        run: |
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+          version="$(tr -d '[:space:]' < VERSION)"
+          if [ -z "$version" ]; then
+            echo "::error::VERSION file is empty"; exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          # A "release" is a push to main whose VERSION has no matching tag yet.
+          release=false
+          if [ "$BRANCH" = "main" ]; then
+            if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+              echo "v$version already released — publishing :latest only."
+            else
+              release=true
+              echo "New version v$version — will publish the pinned image + release."
+            fi
+          fi
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU (for arm64 emulation)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Derive image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: bozodev/glimpse-media-viewer
+          # Read sha/ref from the checked-out repo (the tested commit) rather
+          # than the workflow_run github context (the default branch).
+          context: git
+          tags: |
+            type=raw,value=latest,enable=${{ steps.ver.outputs.branch == 'main' }}
+            type=raw,value=dev,enable=${{ steps.ver.outputs.branch == 'dev' }}
+            type=raw,value=${{ steps.ver.outputs.version }},enable=${{ steps.ver.outputs.release == 'true' }}
+            type=sha,format=short
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Tag + GitHub Release for a new version. Uses GITHUB_TOKEN, which does not
+      # re-trigger this workflow, so there's no double build.
+      - name: Create tag and GitHub Release
+        if: steps.ver.outputs.release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ver.outputs.version }}
+          name: v${{ steps.ver.outputs.version }}
+          target_commitish: ${{ github.event.workflow_run.head_sha || github.sha }}
+          generate_release_notes: true

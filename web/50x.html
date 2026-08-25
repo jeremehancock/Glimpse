@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Server Error - Glimpse Media Viewer</title>
+
+    <!--
+      Shown when nginx generates a 5xx: the container is up enough to answer,
+      but something behind it failed.
+
+      WHY THIS FILE HAS TO EXIST. `config/nginx.conf` has always declared
+      `error_page 500 502 503 504 /50x.html`, and the image shipped no such
+      file. So a 5xx fell through to `error_page 404 /index.html` and served
+      **the whole application shell, with status 404** — measured at 186,727
+      bytes. The user got a working-looking app that then could not load its
+      data, which is indistinguishable from a library with no media in it.
+
+      That is this project's oldest failure mode — a broken install that looks
+      like a working one — reached from a direction nothing was watching. The
+      status a user sees must be the status that occurred.
+
+      Self-contained on purpose. This page appears when something is already
+      wrong, so it must not depend on `/assets/` being served: no stylesheet
+      link, no font, no image. Themed from the path exactly as `offline.html`
+      is, and for the same reason — `config.json` is not reachable here either,
+      and a themed page beats an unstyled one. Falling back to the Plex palette
+      is correct; a 5xx is not the moment to report a configuration error.
+
+      Deliberately NOT precached by the service worker. A cached copy would be
+      served for a route the worker could not fetch, which is the one thing the
+      caching rules forbid: a response the server actually returned is never
+      replaced, and the absence of one is the network's business, not this
+      page's.
+    -->
+    <script>
+      (function () {
+        var segment = (window.location.pathname.split('/')[1] || '').toLowerCase();
+        var server = ['plex', 'jellyfin', 'emby'].indexOf(segment) !== -1 ? segment : 'plex';
+        document.documentElement.setAttribute('data-server', server);
+      })();
+    </script>
+
+    <style>
+      :root[data-server='plex'] {
+        --primary-color: #e5a00d;
+        --primary-hover: #f1b020;
+      }
+
+      :root[data-server='jellyfin'] {
+        --primary-color: #00a4dc;
+        --primary-hover: #0288c2;
+      }
+
+      :root[data-server='emby'] {
+        --primary-color: #52c41a;
+        --primary-hover: #389e0d;
+      }
+
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell,
+          'Open Sans', 'Helvetica Neue', sans-serif;
+        background-color: #1a1a1a;
+        color: #fff;
+        text-align: center;
+        padding: 40px 20px;
+        margin: 0;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+      }
+
+      .container {
+        max-width: 560px;
+      }
+
+      h1 {
+        color: var(--primary-color);
+        margin-bottom: 20px;
+      }
+
+      p {
+        font-size: 18px;
+        line-height: 1.6;
+        margin-bottom: 20px;
+      }
+
+      .hint {
+        font-size: 15px;
+        color: #b0b0b0;
+        margin-bottom: 30px;
+      }
+
+      code {
+        background-color: #2a2a2a;
+        border-radius: 4px;
+        padding: 2px 6px;
+        font-size: 14px;
+      }
+
+      .icon {
+        font-size: 64px;
+        margin-bottom: 30px;
+      }
+
+      button {
+        background-color: var(--primary-color);
+        color: #000;
+        border: none;
+        padding: 12px 20px;
+        border-radius: 24px;
+        font-weight: bold;
+        cursor: pointer;
+        font-size: 16px;
+        transition: background-color 0.3s;
+      }
+
+      button:hover {
+        background-color: var(--primary-hover);
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="container">
+      <div class="icon">⚠️</div>
+      <h1>Server Error</h1>
+      <p>Glimpse is running, but something behind it failed. Your library has not been lost.</p>
+      <p class="hint">
+        The container's own log is the fastest way to find out what:
+        <code>docker logs glimpse-media-viewer</code>
+      </p>
+      <button onclick="window.location.reload()">Try Again</button>
+    </div>
+  </body>
+</html>

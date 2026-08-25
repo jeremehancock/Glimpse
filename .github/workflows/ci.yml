@@ -1,0 +1,108 @@
+name: CI
+
+# Push-only: every commit is built once, on any branch. Pull requests do NOT
+# trigger CI — GitHub attaches check runs to the commit SHA, so the push-CI
+# result is visible on the PR without a second, redundant run. This keeps a
+# single pushed commit to exactly one CI run (and therefore one publish),
+# with no skipped or cancelled duplicate. Trade-off: external fork PRs get no
+# CI here, which is acceptable for this solo dev -> main flow.
+on:
+  push:
+    branches: ['**']
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Lint · Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install toolchain
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff pytest pyyaml requests
+          npm ci
+
+      # Same targets a developer runs locally. Split into two steps so a red
+      # check names which half failed without opening the log.
+      - name: Lint (ruff · eslint · prettier)
+        run: make lint
+
+      - name: Test (pytest)
+        run: make test
+
+  docker:
+    name: Build image · Smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t glimpse:ci .
+
+      - name: Run container and probe it
+        run: |
+          # Credentials that resolve to nothing: the point is that the container
+          # comes up and serves the app, not that it can reach a media server.
+          # An unreachable server is a first-run state a real install passes
+          # through, so the app must not need one to boot.
+          docker run -d --name glimpse -p 8080:80 \
+            -e PLEX_URL=http://127.0.0.1:32400 \
+            -e PLEX_TOKEN=ci-smoke \
+            glimpse:ci
+
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/ >/dev/null 2>&1; then
+              echo "nginx is serving"; served=1; break
+            fi
+            sleep 2
+          done
+          if [ -z "${served:-}" ]; then
+            echo "::error::nginx never served a page"; docker logs glimpse; exit 1
+          fi
+
+          # Readiness, not just liveness. nginx serves /app/web whether or not
+          # the entrypoint finished — the boot script can die halfway and the
+          # container still answers 200 with the files baked into the image. The
+          # generated config is the evidence that it ran to completion.
+          config="$(curl -fsS http://127.0.0.1:8080/config.json)" || {
+            echo "::error::config.json is not being served — the entrypoint did not finish"
+            docker logs glimpse; exit 1
+          }
+          echo "$config"
+          # One line on purpose: inside a YAML block scalar every line must be
+          # indented, and indented Python is a syntax error.
+          echo "$config" | python3 -c 'import json,sys; c=json.load(sys.stdin); assert c["primaryServer"]=="plex", c; assert [s["id"] for s in c["servers"]]==["plex"], c; assert c["sortByDateAdded"] is False, c' \
+            || { echo "::error::config.json did not describe the environment"; docker logs glimpse; exit 1; }
+
+          # The sub-route URLs are documented and bookmarkable. They used to be
+          # separate files written at boot; they are now the same page served by
+          # nginx, and nothing else in the pipeline would notice if they broke.
+          for route in / /plex/ /plex; do
+            code="$(curl -fsS -o /dev/null -w '%{http_code}' "http://127.0.0.1:8080${route}")"
+            [ "$code" = "200" ] || {
+              echo "::error::route ${route} returned ${code}, expected 200"
+              docker logs glimpse; exit 1
+            }
+          done
+
+          # The entrypoint must not have touched an authored file.
+          docker exec glimpse test ! -e /app/web/test.html || {
+            echo "::error::the entrypoint wrote into the web root"; exit 1
+          }
+
+          echo "Smoke test passed"

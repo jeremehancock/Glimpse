@@ -13,11 +13,14 @@ RUN pip install requests
 # Set up directories
 RUN mkdir -p /app/web /app/data /app/scripts
 
-# Copy Python scripts
-COPY scripts/plex_data_fetcher.py /app/scripts/
-COPY scripts/jellyfin_data_fetcher.py /app/scripts/
-RUN chmod +x /app/scripts/plex_data_fetcher.py
-RUN chmod +x /app/scripts/jellyfin_data_fetcher.py
+# Copy Python scripts.
+#
+# The whole directory, not a file list. glimpse_config.py was added and the
+# per-file COPY silently left it out of the image — the container then refused
+# to start, correctly, but only at runtime. A directory copy cannot drift from
+# what the entrypoint invokes.
+COPY scripts/ /app/scripts/
+RUN chmod +x /app/scripts/*.py
 
 # Copy web files
 COPY web/ /app/web/

@@ -1,0 +1,108 @@
+schema: spec-driven
+
+# Project context shown to AI when creating artifacts.
+context: |
+  Project: Glimpse — a self-hosted, read-only web viewer for a media library.
+  It fetches movie and TV show metadata plus artwork from Plex, Jellyfin, and/or
+  Emby on a cron schedule, writes it to a mounted volume as JSON + images, and
+  serves a static single-page interface over nginx that browses that snapshot.
+  It never writes back to the media server. This is a clean-room rewrite of an
+  older single-file implementation (one 4,000-line index.html plus a 1,900-line
+  entrypoint.sh that rewrote that HTML with sed at boot).
+
+  Hard constraint: docker-compose.yml is FROZEN. The image name
+  (bozodev/glimpse-media-viewer), the port mapping (9090:80), the ./data:/app/data
+  volume, the optional ./logo.png:/app/web/images/logo.png bind mount, and every
+  environment variable it names must keep working with identical semantics. An
+  existing user's compose file must run the rewrite unchanged.
+
+  Tech stack:
+    - Python 3.13 for the fetchers. Standard library plus `requests`. No web
+      framework — the fetchers are batch jobs run by cron, not services.
+    - Static frontend: HTML + ES modules + CSS custom properties. Alpine.js is
+      vendored (no CDN — the app is an offline-capable PWA). No build step;
+      nginx serves the files as authored.
+    - nginx serves /app/web (the app) and /app/data (the snapshot). supervisord
+      runs nginx + cron. Debian slim base image.
+    - Toolchain: ruff (lint + format) and pytest for Python; prettier and eslint
+      for JS/CSS/HTML. Driven by `make lint`, `make test`, `make fmt`.
+
+  Conventions:
+    - The entrypoint validates the environment and writes /app/web/config.json.
+      It NEVER edits web assets. Per-server theming is a `data-server` attribute
+      on <html> plus CSS custom properties — never a separate copy of index.html,
+      never sed over shipped markup. If a behavior needs the entrypoint to touch
+      a file under /app/web other than config.json, that is a spec change.
+    - The frontend reads configuration from config.json exactly once at boot into
+      a single store. Never re-read it, and never introduce a second source for a
+      setting.
+    - Emby and Jellyfin share one fetcher: their APIs are compatible. Treat them
+      as one adapter with two identities, not two code paths.
+    - Artwork is re-downloaded only when its MD5 changes. The checksum store is
+      per-server and lives on the mounted volume.
+    - An overlay is a tray (bottom sheet on phones, centered dialog on desktop).
+      It declares role="dialog" and tabindex="-1" so the focus manager finds it;
+      an overlay that declares neither opens with the keyboard user stranded on
+      the page behind it. A control that closes its own tray and opens another
+      moves focus to something still on screen first.
+    - A control is switched off with aria-disabled, never the disabled attribute,
+      and every such binding needs a guard at the action.
+    - Every capability is defined by an OpenSpec spec before it is built.
+    - `make lint` and `make test` must pass in CI on every push.
+
+  External dependencies (not built here):
+    - Plex Media Server HTTP API (X-Plex-Token).
+    - Jellyfin / Emby HTTP API (X-Emby-Token). One adapter serves both.
+    - YouTube embeds for trailers. The trailer key comes from the media server's
+      metadata; Glimpse embeds it and fetches nothing itself.
+
+  Capability map. Every capability has a spec in openspec/specs/; a change
+  MUST target one of these rather than inventing a capability named after the
+  change itself:
+    - application-shell   (the container: entrypoint, config.json contract,
+                           nginx routing, supervisord, cron wiring, the frozen
+                           docker-compose surface)
+    - media-fetch         (talking to Plex/Jellyfin/Emby: libraries, items,
+                           the JSON snapshot schema, cron scheduling)
+    - artwork-cache       (posters and backdrops on disk, MD5 skip-unchanged,
+                           file permissions for nginx)
+    - library-exclusion   (excluding libraries by name or id, per server, and
+                           cleaning already-fetched data when a list changes)
+    - media-browsing      (the grid: movies and TV shows tabs, lazy-loaded
+                           posters, responsive layout, scroll-to-top, swipe)
+    - media-detail        (the per-item tray: poster, backdrop, summary,
+                           rating, duration, genres, cast, date added)
+    - search              (live search across the loaded snapshot,
+                           article-aware matching)
+    - sorting             (A–Z / Z–A and date-added ascending/descending,
+                           natural compare, the SORT_BY_DATE_ADDED default)
+    - genre-filter        (genre extraction with counts, the genre tray)
+    - trailers            (the trailer overlay and its YouTube embed)
+    - roulette            ("Roll the Dice" random pick from the current view)
+    - multi-server        (detecting which servers are configured, choosing the
+                           primary, switching between them, and the per-server
+                           theme that follows)
+    - visual-design       (the design token contract, surface layering, tray and
+                           dialog presentation, pointer/focus feedback, reduced
+                           motion, and where focus goes when an overlay opens
+                           and closes)
+    - pwa                 (installable manifest, service worker, offline page,
+                           per-server icons)
+    - release-publishing  (branch -> Docker tag, VERSION-driven releases;
+                           build/release behavior, not an app capability)
+
+  Note: Glimpse is read-only. There is no path that writes to a media server,
+  and no user account or session — anyone who can reach the port sees the
+  library. Adding either is a spec change, not a wiring decision.
+
+# Per-artifact rules
+rules:
+  proposal:
+    - Keep the Why section focused on user value, not implementation detail.
+    - State explicitly whether the change touches the frozen docker-compose
+      surface. If it does, say how an existing user's compose file keeps working.
+  # `specs`, not `spec`: the artifact id comes from the schema, and a key that
+  # does not match one is dropped with a warning rather than applied.
+  specs:
+    - Scenarios MUST use exactly four hashtags (#### Scenario:).
+    - Use SHALL/MUST for normative requirements.

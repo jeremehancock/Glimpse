@@ -1,0 +1,528 @@
+/* ==========================================================================
+   Overlay presentation.
+
+   One system, two shapes. A TRAY (.sheet) docks to the bottom edge and slides;
+   a DIALOG (.modal) centres and scales. Both carry a backdrop, a grab handle, a
+   titled head, and a body that scrolls.
+
+   Which shape an overlay wears is a product decision per overlay, not a
+   breakpoint: the detail view is a tray on a phone and a dialog on a desktop,
+   but the trailer is a dialog everywhere because it is sized to a video, and a
+   tray's job is to fill the width of a screen.
+
+   Ported from Marquee. The comments that survive the port are the ones that
+   record a decision someone would otherwise undo.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   Tray
+   -------------------------------------------------------------------------- */
+
+.sheet {
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-sheet);
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+}
+
+.sheet__backdrop {
+    position: absolute;
+    inset: 0;
+    background: var(--backdrop-tint);
+    -webkit-backdrop-filter: var(--backdrop-blur);
+    backdrop-filter: var(--backdrop-blur);
+}
+
+/* The panel clips; its body scrolls. Keeping the scroll on the body rather than
+   the panel means anything pinned over the tray stays put while content moves
+   under it. */
+.sheet__panel {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: 560px;
+    max-height: 85vh;
+    overflow: hidden;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-bottom: none;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    /* A tray is docked to the bottom edge, so it casts UPWARD. The usual
+       downward offsets would throw the shadow off-screen and leave the raised
+       top edge — the only edge anyone sees — flat against the page. */
+    box-shadow: 0 -4px 8px rgba(0, 0, 0, 0.36), 0 -12px 32px rgba(0, 0, 0, 0.34);
+    /* Not the entrance — that belongs to the transition classes below. This is
+       what the drag gesture animates against when it releases a partly-dragged
+       tray, which is a different movement from opening or closing. */
+    transition: transform var(--dur-base) var(--ease-standard);
+}
+
+/* For a tray holding a whole screen of content rather than a short list. */
+.sheet__panel--tall {
+    max-height: 92vh;
+    min-height: 60vh;
+}
+
+.sheet__body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    /* Stop at the end of the tray's own content. Without this, a flick that
+       reaches the end hands the rest of the gesture to the page behind, which
+       then scrolls — or, at the top, pulls to refresh — from under an overlay
+       the user thought had the screen. */
+    overscroll-behavior: contain;
+    padding: 0 16px calc(20px + env(safe-area-inset-bottom));
+}
+
+/* The grab handle: the affordance that replaces a close button on touch.
+   `touch-action: none` is what stops the browser claiming the drag as a scroll,
+   and it only works because the grip is not itself the scroller — see the
+   gesture in overlays.js. */
+.sheet__grip {
+    display: flex;
+    justify-content: center;
+    padding: 12px 0 0;
+    cursor: grab;
+    touch-action: none;
+}
+
+.sheet__handle {
+    width: 40px;
+    height: 5px;
+    border-radius: var(--radius-pill);
+    background: #4b4f57;
+}
+
+/* ONE head, worn by both shapes. Declared here rather than twice because the
+   two rules had already drifted: 14px against 16px of top padding, which put
+   the roulette's title 2px lower than every tray's below the same grab handle.
+
+   The vertical padding is shared BECAUSE the handle is shared. An overlay
+   carrying that handle makes a promise about where the panel begins, and the
+   title is the first thing that promise is measured against; trays are opened
+   one after another from the same screen, so a two-pixel difference between
+   them does not read as two pixels, it reads as the trays not sitting still.
+
+   Matching padding is only half of it. The distance the eye measures runs to
+   the glyph, not to the top of the line box, so the title's half-leading is
+   part of the gap — see the comment on .sheet__title, which is where the other
+   half is kept.
+
+   Only the horizontal inset differs, below, and it is not arbitrary: each head
+   is inset with the body beneath it. */
+.sheet__head,
+.modal__head {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding-top: 14px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 12px;
+    touch-action: none;
+}
+
+/* Matching .sheet__body. */
+.sheet__head {
+    padding-left: 16px;
+    padding-right: 16px;
+}
+
+/* Deliberately the same type as .modal__head h2.
+
+   A tray and a dialog wear the same grab handle, so they must hold their titles
+   the same distance below it. Matching padding is only half of that: the
+   distance the eye measures runs to the glyph, not to the top of the line box,
+   so the title's half-leading is part of it. line-height is inherited rather
+   than set for that reason — restoring an override here is the edit most likely
+   to undo this quietly, because it changes nothing about the padding anyone
+   would think to check. */
+.sheet__title {
+    font-weight: 600;
+    font-size: 1.1rem;
+}
+
+/* --------------------------------------------------------------------------
+   Dialog
+   -------------------------------------------------------------------------- */
+
+.modal {
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-modal);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+}
+
+.modal__backdrop {
+    position: absolute;
+    inset: 0;
+    background: var(--backdrop-tint);
+    -webkit-backdrop-filter: var(--backdrop-blur);
+    backdrop-filter: var(--backdrop-blur);
+}
+
+.modal__panel {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    width: min(560px, 100%);
+    max-height: 88vh;
+    overflow: hidden;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--elev-4);
+}
+
+.modal__panel--wide {
+    width: min(900px, 100%);
+}
+
+/* Sized to a 16:9 video rather than to the screen. */
+.modal__panel--video {
+    width: min(960px, 100%);
+    background: #000;
+}
+
+.modal__body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 0 20px 20px;
+}
+
+/* A dialog may hold content ABOVE its scrolling body that does not scroll with
+   it — the detail overlay pins the item's poster and metadata there, so they
+   stay in view while the summary moves.
+
+   Three properties, and each is doing work. `flex: 0 0 auto` against the body's
+   `1 1 auto` is what makes one region hold and the other absorb. `position:
+   relative` gives the item's artwork a box to fill, so its extent follows the
+   layout instead of a hardcoded height. `touch-action: none` puts the region in
+   the drag gesture rather than leaving it a dead patch at the top of a tray —
+   see the selector list in overlays.js, which must name it too.
+
+   It must never become a scroller itself. `touch-action: none` here and on the
+   grip and head inside it is honoured only while none of them is the scrolling
+   container; make this one scroll and the browser silently takes the swipe back,
+   with no error and no visual difference on a desktop. Bound its height by
+   capping what grows inside it instead. */
+.modal__fixed {
+    flex: 0 0 auto;
+    position: relative;
+    touch-action: none;
+}
+
+/* Everything but the inset is shared with .sheet__head — see that rule in the
+   tray section. This is a dialog's head, so it is inset with .modal__body. */
+.modal__head {
+    padding-left: 20px;
+    padding-right: 20px;
+}
+
+.modal__head h2 {
+    font-weight: 600;
+    font-size: 1.1rem;
+    margin: 0;
+}
+
+/* The grab handle is markup on every overlay but is a touch affordance only. On
+   a pointer device the dialog is centred and closes with its own × button, so
+   the handle would promise a drag that leads nowhere. The touch block at the
+   bottom of this file turns it back on. */
+.modal .sheet__grip {
+    display: none;
+}
+
+.overlay__close {
+    flex: 0 0 auto;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-pill);
+    color: var(--muted);
+    font-size: 1.5rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: background var(--dur-exit) var(--ease-standard),
+        color var(--dur-exit) var(--ease-standard);
+}
+
+.overlay__close:hover,
+.overlay__close:focus-visible {
+    background: var(--surface-2);
+    color: var(--text);
+}
+
+/* The focus manager moves focus onto the panel itself when an overlay opens, so
+   its name is announced and the user tabs forward through its contents.
+   Suppress the ring that would otherwise draw around the whole panel.
+
+   Not a general opt-out, and deliberately narrow: the selector requires both
+   attributes together, a combination only a dialog panel carries, so it cannot
+   reach a control. A panel is announced, not operated. */
+[role='dialog'][tabindex='-1']:focus,
+[role='dialog'][tabindex='-1']:focus-visible {
+    outline: none;
+}
+
+/* --------------------------------------------------------------------------
+   Transitions
+
+   Alpine owns WHEN (it applies these classes); the stylesheet owns HOW. That
+   division is what lets one set of classes serve both shapes: a dialog and a
+   tray differ in how they move, not in when, and the panel rules below key that
+   difference off which panel is inside.
+
+   `enter-start` and `leave-end` are the same class, as are `enter-end` and
+   `leave-start`: an overlay has two resting appearances, shut and shown, and a
+   transition is a trip between them in one direction or the other.
+   -------------------------------------------------------------------------- */
+
+.overlay-opening {
+    transition: opacity var(--dur-base) var(--ease-entrance);
+}
+
+/* `pointer-events: none` is load-bearing, not polish. Alpine holds the element
+   displayed for the length of the leave transition, so without it a dismissed
+   overlay goes on swallowing clicks while it fades — the user dismisses it,
+   reaches for something behind it, and the tap lands on a backdrop that is
+   visually almost gone. */
+.overlay-closing {
+    transition: opacity var(--dur-exit) var(--ease-exit);
+    pointer-events: none;
+}
+
+.overlay-shut {
+    opacity: 0;
+}
+
+.overlay-shown {
+    opacity: 1;
+}
+
+/* A dialog scales from slightly reduced. 0.96 rather than anything smaller: it
+   should look like it is arriving, not like it is being thrown at the screen.
+   Scaling the overlay root would take the backdrop with it, so the transform is
+   on the panel and the fade is on the root. */
+.overlay-opening .modal__panel {
+    transition: transform var(--dur-base) var(--ease-entrance);
+}
+
+.overlay-closing .modal__panel {
+    transition: transform var(--dur-exit) var(--ease-exit);
+}
+
+.overlay-shut .modal__panel {
+    transform: scale(0.96);
+}
+
+.overlay-shown .modal__panel {
+    transform: scale(1);
+}
+
+/* A tray slides instead, and takes longer doing it — it travels the height of
+   its own panel rather than 4% of it. */
+.overlay-opening .sheet__panel {
+    transition: transform var(--dur-slow) var(--ease-entrance);
+}
+
+.overlay-closing .sheet__panel {
+    transition: transform var(--dur-exit) var(--ease-exit);
+}
+
+.overlay-shut .sheet__panel {
+    transform: translateY(100%);
+}
+
+.overlay-shown .sheet__panel {
+    transform: translateY(0);
+}
+
+/* --------------------------------------------------------------------------
+   Page scroll lock
+
+   Pinning the body is the only technique that holds on iOS Safari: `overflow:
+   hidden` on the body is unreliable there, and `overscroll-behavior` is not
+   honoured on the document at all. overlays.js writes the class and restores
+   the scroll position.
+   -------------------------------------------------------------------------- */
+
+.is-overlay-open body {
+    position: fixed;
+    left: 0;
+    right: 0;
+    width: 100%;
+    overflow: hidden;
+}
+
+/* --------------------------------------------------------------------------
+   Pointer presentation
+
+   A tray is a TOUCH shape. Docked to the bottom edge, full-bleed, dismissed by
+   dragging a handle — all of which assumes a thumb. On a desktop it is simply a
+   panel glued to the bottom of a large screen, with a drag affordance that
+   promises a gesture nobody is going to make with a mouse.
+
+   So above the touch breakpoint a `.sheet` presents as a centred dialog. The
+   markup does not change and neither does any behavior: the backdrop still
+   dismisses, Escape still closes, focus is still managed. Only the shape moves.
+
+   This block is what makes "a tray on touch, a dialog on a pointer device" true
+   for the menu, genre and server overlays. Without it they render as bottom
+   sheets at every width, which is exactly what a desktop user reported.
+   -------------------------------------------------------------------------- */
+
+@media (min-width: 768px) {
+    .sheet {
+        align-items: center;
+        padding: 16px;
+    }
+
+    .sheet__panel {
+        width: min(560px, 100%);
+        max-height: 80vh;
+        border-bottom: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--elev-4);
+    }
+
+    /* The handle is a drag affordance and there is no drag here. */
+    .sheet__grip {
+        display: none;
+    }
+
+    /* Head padding did the spacing below the handle; without the handle the
+       title needs the dialog's own top padding instead.
+
+       Keyed on a preceding grip, and both heads are named, so the compensation
+       lands on exactly the overlays that just lost a handle. It used to name
+       `.sheet__head` alone, which left the detail and roulette dialogs — whose
+       handles this same block hides — without it.
+
+       `~` and not `+`: `.modal-backdrop-art` sits between the detail overlay's
+       grip and its head, so the adjacent combinator would miss the one overlay
+       most in need of matching. It does mean the rule depends on the grip
+       staying a SIBLING of the head; nest it and this drops out silently, and
+       the title simply sits 4px high.
+
+       It must also stay inside this media query. A sibling selector matches a
+       grip that is `display: none`, so the selector alone says "has a grip in
+       the markup" — the breakpoint supplies "and it is hidden". That is the
+       same breakpoint hiding it, immediately above, and the two must not drift
+       apart. The trailer has no grip at any width and is deliberately
+       untouched: it never had a handle to compensate for. */
+    .sheet__grip ~ .sheet__head,
+    .sheet__grip ~ .modal__head {
+        padding-top: 18px;
+    }
+
+    /* Scale like a dialog rather than sliding up from an edge it is no longer
+       docked to. These override the tray rules above, so they must come after. */
+    .overlay-opening .sheet__panel {
+        transition: transform var(--dur-base) var(--ease-entrance);
+    }
+
+    .overlay-shut .sheet__panel {
+        transform: scale(0.96);
+    }
+
+    .overlay-shown .sheet__panel {
+        transform: scale(1);
+    }
+}
+
+/* --------------------------------------------------------------------------
+   Touch presentation
+
+   Below this width a dialog that opted in becomes a tray: docked to the bottom
+   edge, full width, square-shouldered at the bottom, with its grab handle back.
+   Opting in is `.modal--tray-on-touch`, so an overlay sized to its content —
+   the trailer, the roulette spinner — stays centred.
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 767px) {
+    .modal--tray-on-touch {
+        align-items: flex-end;
+        padding: 0;
+    }
+
+    .modal--tray-on-touch .modal__panel {
+        width: 100%;
+        max-width: none;
+        max-height: 88vh;
+        border-bottom: none;
+        border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+        box-shadow: 0 -4px 8px rgba(0, 0, 0, 0.36), 0 -12px 32px rgba(0, 0, 0, 0.34);
+    }
+
+    /* The handle is the dismissal affordance here, so the × goes: two ways to
+       close, one of which is a small target in the corner furthest from a
+       thumb, is worse than one that is obvious. */
+    .modal--tray-on-touch .sheet__grip {
+        display: flex;
+    }
+
+    /* Both shapes, not just the dialog that opted in. A `.sheet` below this
+       width IS a tray — that is what the pointer block above says by only
+       turning it into a dialog above 768px — so the reasoning applies to it
+       unchanged. It was scoped to `.modal--tray-on-touch` alone, which left the
+       genre and server trays showing a handle AND a ×.
+
+       This rule and the one above are a PAIR with the pointer block's
+       `.sheet__grip { display: none }`. One hides the handle and shows the ×,
+       the other does the reverse, and they must stay at the same breakpoint or
+       a width exists where an overlay has neither affordance. That is not
+       hypothetical here: the hand-off that hides the header's controls and
+       shows the tray trigger drifted to 992px and 768px once already, leaving
+       every width between with neither. */
+    .sheet .overlay__close,
+    .modal--tray-on-touch .overlay__close {
+        display: none;
+    }
+
+    /* Slide rather than scale, matching a real tray. The panel rules above are
+       keyed on .modal__panel, so these have to win on specificity.
+
+       NO SPACE before `.modal--tray-on-touch`. Alpine puts the transition class
+       on the overlay ROOT, which is the same element that carries the modifier —
+       `<div class="modal modal--tray-on-touch overlay-shut">`. A descendant
+       combinator therefore asks for an `.overlay-shut` ANCESTOR of the modifier,
+       which does not exist, and all three of these matched **nothing** from the
+       day they were written.
+
+       Nothing errored and nothing looked broken on a desktop, because the
+       generic `.overlay-shut .modal__panel { transform: scale(0.96) }` above is
+       a legitimate rule that then wins by default. So the detail overlay and the
+       roulette scaled like centred dialogs on a phone while every other tray
+       slid, and the symptom read as "the tray animation feels wrong" rather than
+       as a selector that never matched.
+
+       Measured: `.overlay-shut .modal--tray-on-touch .modal__panel` matched 0
+       elements; the compound form matches 1. */
+    .overlay-opening.modal--tray-on-touch .modal__panel {
+        transition: transform var(--dur-slow) var(--ease-entrance);
+    }
+
+    .overlay-shut.modal--tray-on-touch .modal__panel {
+        transform: translateY(100%) scale(1);
+    }
+
+    .overlay-shown.modal--tray-on-touch .modal__panel {
+        transform: translateY(0) scale(1);
+    }
+}

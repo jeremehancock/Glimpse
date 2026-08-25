@@ -7,7 +7,7 @@
     <title>Glimpse</title>
 
     <!-- PWA Meta Tags -->
-    <meta name="theme-color" content="#e5a00d">
+    <meta name="theme-color" content="#131313">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Glimpse Media">
     <meta name="application-name" content="Glimpse Media Viewer">
@@ -16,20 +16,111 @@
     <!-- PWA Manifest -->
     <link rel="manifest" href="/manifest.json">
 
-    <!-- PWA Icons -->
+    <!-- Design tokens and the overlay presentation. Loaded before the inline
+         <style> below so the page's own rules can still override, and so the
+         token declarations exist by the time anything reads them. -->
+    <link rel="stylesheet" href="/assets/tokens.css">
+    <link rel="stylesheet" href="/assets/overlays.css">
+
+    <!-- Alpine drives overlay open state. Vendored, not from a CDN: this is an
+         offline-capable PWA, and a CDN script is a network dependency that
+         breaks the app precisely when the network is what failed.
+         `defer` so it runs after the document is parsed. -->
+    <script defer src="/assets/alpine.min.js"></script>
+    <script defer src="/assets/overlays.js"></script>
+
+    <!-- PWA Icons. The href values here are the Plex set; the boot script below
+         repoints them when another server is active. -->
     <link rel="icon" type="image/png" sizes="192x192" href="/images/android-chrome-192x192.png">
     <link rel="icon" type="image/png" sizes="512x512" href="/images/android-chrome-592x592.png">
 
-    <link rel="apple-touch-icon" sizes="180x180" href="images/apple-touch-icon.png">
-    <link rel="icon" type="image/png" sizes="32x32" href="images/favicon-32x32.png">
-    <link rel="icon" type="image/png" sizes="16x16" href="images/favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png">
+
+    <!--
+      ==================================================================
+      CONFIG ADAPTER — temporary, removed by the frontend rewrite.
+      ==================================================================
+
+      Introduced by the OpenSpec change `replace-boot-time-html-rewriting`,
+      which deleted ~1,700 lines of shell that used to bake all of this into
+      the markup with `sed` at container start.
+
+      Everything between this comment and the one marked END OF CONFIG ADAPTER
+      exists to read /config.json and apply what `sed` used to substitute: the
+      theme, the title, the data paths, the default sort, the icons, and the
+      server switcher. The next change replaces this file wholesale and this
+      block goes with it. Do not build on it.
+
+      WHY A SYNCHRONOUS REQUEST. The theme has to be on <html> before first
+      paint — applying it later paints the Plex palette and then swaps it, a
+      visible flash of the wrong brand on every load for two thirds of users.
+      Nothing asynchronous can meet that, so this is a blocking read of a
+      sub-kilobyte, same-origin, no-cache file served by the nginx in the same
+      container. Browsers log a deprecation notice for it; that is the known
+      and accepted cost. It falls back gracefully if the read fails, and the
+      application-level error is raised later by loadConfig().
+
+      DO NOT try to make this survive the container being unreachable by
+      caching it in the service worker. A browser dispatches no fetch event for
+      a synchronous XHR, so the worker never sees this request and cannot answer
+      it. That was measured, not assumed. If the app should ever start without
+      the container, the copy has to live somewhere readable before first paint
+      — and that is a product decision, not a wiring one: showing a library
+      that may be out of date is exactly the ambiguity this app refuses
+      elsewhere.
+    -->
+    <script>
+        window.GLIMPSE = (function () {
+            var SERVER_IDS = ['plex', 'jellyfin', 'emby'];
+            var config = null;
+
+            try {
+                var request = new XMLHttpRequest();
+                // Synchronous on purpose. See the comment above.
+                request.open('GET', '/config.json', false);
+                request.send(null);
+                if (request.status >= 200 && request.status < 300) {
+                    config = JSON.parse(request.responseText);
+                }
+            } catch (error) {
+                // Swallowed here only so the page still renders enough chrome to
+                // show the error. loadConfig() reports it properly.
+                config = null;
+            }
+
+            // First path segment, when it names a server.
+            var segment = (window.location.pathname.split('/')[1] || '').toLowerCase();
+            var fromPath = SERVER_IDS.indexOf(segment) !== -1 ? segment : null;
+
+            var configured = (config && config.servers) || [];
+            var isConfigured = function (id) {
+                return configured.some(function (server) { return server.id === id; });
+            };
+
+            // A path naming a server that is not configured is a bookmark that
+            // outlived a configuration change. Send it home rather than showing
+            // an empty library.
+            if (config && fromPath && !isConfigured(fromPath)) {
+                window.location.replace('/');
+            }
+
+            var active = (fromPath && isConfigured(fromPath))
+                ? fromPath
+                : (config && config.primaryServer) || 'plex';
+
+            // Before first paint: this script is parser-blocking and sits above
+            // every stylesheet rule that reads the token.
+            document.documentElement.setAttribute('data-server', active);
+
+            return { config: config, activeServer: active, serverIds: SERVER_IDS };
+        })();
+    </script>
 
     <style>
         :root {
             --poster-width: 200px;
-            --primary-color: #e5a00d;
-            --primary-hover: #f1b020;
-            --primary-light: rgba(229, 160, 13, 0.1);
             --bg-color: #1a1a1a;
             --secondary-bg: #2a2a2a;
             --header-bg: #242424;
@@ -42,6 +133,72 @@
             --transition-speed: 0.3s;
             --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.1);
             --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        /* Per-server palettes.
+         *
+         * These replace the per-server <style> blocks the entrypoint used to
+         * append to this file, every rule of which carried !important — needed
+         * only because an injected block had to out-rank the stylesheet it was
+         * appended to. That problem disappears once the theme is a variable the
+         * stylesheet already reads, which is why there is not an !important in
+         * sight below.
+         *
+         * data-server is set by the boot script above, before first paint.
+         * The Plex block is also the fallback: if config.json cannot be read,
+         * the attribute is still "plex" and the app is themed rather than
+         * unstyled while it reports the error.
+         */
+        :root[data-server='plex'] {
+            --primary-color: #e5a00d;
+            --primary-hover: #f1b020;
+            --primary-light: rgba(229, 160, 13, 0.1);
+            --accent-gradient: linear-gradient(135deg, #e5a00d, #f1b020);
+        }
+
+        :root[data-server='jellyfin'] {
+            --primary-color: #00a4dc;
+            --primary-hover: #0288c2;
+            --primary-light: rgba(0, 164, 220, 0.1);
+            --accent-gradient: linear-gradient(135deg, #00a4dc, #7b68ee);
+        }
+
+        :root[data-server='emby'] {
+            --primary-color: #52c41a;
+            --primary-hover: #389e0d;
+            --primary-light: rgba(82, 196, 26, 0.1);
+            --accent-gradient: linear-gradient(135deg, #52c41a, #389e0d);
+        }
+
+        /* The configuration error. Deliberately plain and dependent on nothing:
+         * it has to render when the thing that failed is the configuration.
+         */
+        .config-error {
+            max-width: 40rem;
+            margin: 15vh auto;
+            padding: 2rem;
+            background: #2a2a2a;
+            border-left: 4px solid #e5484d;
+            border-radius: 6px;
+            color: #fff;
+            font-family: system-ui, -apple-system, sans-serif;
+            line-height: 1.6;
+        }
+
+        .config-error h2 {
+            margin-bottom: 0.75rem;
+            font-size: 1.25rem;
+        }
+
+        .config-error code {
+            background: #1a1a1a;
+            padding: 0.15em 0.4em;
+            border-radius: 3px;
+            font-size: 0.9em;
+        }
+
+        .config-error p+p {
+            margin-top: 0.75rem;
         }
 
         * {
@@ -76,7 +233,18 @@
             right: 0;
             height: var(--header-height);
             background-color: var(--header-bg);
-            z-index: 100;
+            /* Page chrome, so it ranks BELOW every overlay — see the layering
+               scale in tokens.css. This was 100, above both overlay tiers, and
+               the consequences were not subtle: the detail dialog rendered
+               underneath the header on a desktop, and on a phone the header
+               stayed lit and unblurred above every tray's backdrop, so a tray
+               read as sliding in behind the page rather than over it.
+
+               An overlay's backdrop exists to withdraw the page. Chrome that
+               outranks the backdrop is not withdrawn, and where an overlay is
+               tall enough to reach under this bar, the bar covers its title and
+               its grab handle outright. */
+            z-index: var(--z-chrome);
             transition: height var(--transition-speed), box-shadow var(--transition-speed);
             box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
             backdrop-filter: blur(10px);
@@ -268,42 +436,6 @@
             font-size: 0.9rem;
         }
 
-        /* Desktop Genre dropdown styles */
-        .genre-dropdown {
-            position: relative;
-            display: inline-block;
-        }
-
-        .genre-menu {
-            display: none;
-            position: absolute;
-            top: 100%;
-            right: 0;
-            /* Position from right instead of left */
-            margin-top: 5px;
-            background-color: var(--secondary-bg);
-            border-radius: 8px;
-            box-shadow: var(--shadow-md);
-            overflow: hidden;
-            z-index: 10;
-            min-width: 180px;
-            max-width: 300px;
-            /* Set a max width to prevent it from getting too large */
-            max-height: 300px;
-            overflow-y: auto;
-        }
-
-        /* For dropdowns near the left edge of the screen */
-        .genre-dropdown:first-child .genre-menu {
-            left: 0;
-            right: auto;
-        }
-
-        .genre-menu.show {
-            display: block;
-            animation: fadeIn 0.2s ease;
-        }
-
         @keyframes fadeIn {
             from {
                 opacity: 0;
@@ -316,22 +448,111 @@
             }
         }
 
+        /* The shared tray-choice control. Used by BOTH the genre tray and the
+           server switcher — `populateServerTray()` builds its destinations with
+           this class deliberately, because they are the same control offering
+           different things. A change here lands in both, which is the intent;
+           styling them apart is how they drift.
+
+           Every property that resets the browser's own button chrome is
+           load-bearing rather than defensive. This rule used to describe
+           full-width `<div>` rows in a dropdown that no longer exists — padding,
+           cursor, white-space, font-size and nothing else — and the conversion
+           to a `<button>` left all of that in place. With no background, border,
+           colour, font or display of its own, the entry fell back to the user
+           agent's control: a white box with a system border and a system font,
+           laid out inline and wrapping raggedly across the tray.
+
+           `appearance: none` and `font: inherit` are what stop that coming back
+           on a browser whose defaults differ from the one it was checked in.
+
+           The authored all-genres placeholder in the markup is still a `<div>`
+           while every generated entry is a `<button>`. Specifying the chrome
+           explicitly is what makes the two render identically instead of the
+           placeholder flashing unstyled before updateGenreList() replaces it. */
         .genre-item {
-            padding: 10px 15px;
-            cursor: pointer;
-            transition: all var(--transition-speed);
-            white-space: nowrap;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 16px;
+            appearance: none;
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-pill);
+            color: var(--light-text);
+            font: inherit;
             font-size: 0.9rem;
+            line-height: 1.2;
+            text-align: left;
+            cursor: pointer;
+            transition: background var(--dur-base) var(--ease-standard),
+                border-color var(--dur-base) var(--ease-standard),
+                color var(--dur-base) var(--ease-standard);
         }
 
         .genre-item:hover {
-            background-color: rgba(255, 255, 255, 0.1);
+            background-color: #3c4048;
+            border-color: var(--border-strong);
         }
 
+        .genre-item:focus-visible {
+            outline: 2px solid var(--primary-color);
+            outline-offset: 2px;
+        }
+
+        /* The selection. `aria-pressed` on the element carries the same fact for
+           anyone not looking at it — a class alone is invisible to a screen
+           reader, which is why genreItem() sets both. */
         .genre-item.active {
             background-color: var(--primary-light);
+            border-color: var(--primary-color);
             color: var(--primary-color);
             font-weight: 600;
+        }
+
+        /* The name. Allowed to wrap rather than forced onto one line: a long
+           genre in a narrow tray takes two lines inside its own pill, which is
+           better than a pill that overflows the tray. */
+        .genre-item__label {
+            min-width: 0;
+        }
+
+        /* The count is secondary to the name it qualifies. Quieter, smaller, and
+           separated by the flex gap above — with neither element styled, `Action`
+           and `794` abutted as `Action794`, which reads as one word and makes the
+           name unrecognisable at a glance.
+
+           `:empty` rather than a class, because genreItem() writes an empty
+           string when there is nothing to count and populateServerTray() omits
+           the element entirely. Without this the flex gap still reserves space
+           beside a badge that renders nothing, so a server name sits oddly
+           off-centre in its own pill. */
+        .genre-item__count {
+            flex: 0 0 auto;
+            font-size: 0.75rem;
+            font-weight: 500;
+            color: var(--muted-text);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .genre-item.active .genre-item__count {
+            color: inherit;
+            opacity: 0.75;
+        }
+
+        .genre-item__count:empty {
+            display: none;
+        }
+
+        /* The two tray bodies that hold those choices.
+           Neither had any rule at all, which is the other half of the ragged
+           layout: inline-block children in a block container flow as text. */
+        .genre-tray__body,
+        .server-tray__body {
+            display: flex;
+            flex-wrap: wrap;
+            align-content: flex-start;
+            gap: 8px;
         }
 
         .genre-badge {
@@ -370,12 +591,39 @@
             transform: translateY(0);
         }
 
+        /* `overflow-anchor: none` is a guard, and its status is worth being
+           exact about: it is NOT known to be doing anything here.
+
+           The grid is windowed, so the spacer standing in for the rows above
+           the viewport changes height every time the window moves. Scroll
+           anchoring exists to hold the page still when content above the
+           viewport resizes, and on paper it would fight that: adjust scrollY,
+           which moves the window, which resizes the spacer again.
+
+           Measured with it on and off — eight instant scrolls, drift after each
+           — and the drift was zero either way. Chromium appears not to anchor
+           against a change that follows a scroll it just performed. So this is
+           kept as a guard against a documented interaction that could not be
+           reproduced, not as a fix for an observed one.
+
+           Do not cite it as the cause of anything without re-measuring. The
+           oscillation this originally went in to fix turned out to be
+           `scroll-behavior: smooth` still in flight — a test measuring a
+           position the user never occupied. */
         .media-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(var(--poster-width), 1fr));
             gap: 20px;
             padding: 20px 0;
             margin-bottom: 60px;
+            overflow-anchor: none;
+        }
+
+        /* Stands in for the rows the window is not rendering. It has no content
+           and must never be an anchor candidate either — see above. */
+        .grid-spacer {
+            overflow-anchor: none;
+            pointer-events: none;
         }
 
         /* Enhanced media items */
@@ -547,7 +795,11 @@
                 opacity var(--transition-speed),
                 transform var(--transition-speed);
             opacity: 0;
-            z-index: 1000;
+            /* Page chrome, on the same tier as the header. This was 1000 — a
+               number that beat every other value in the file rather than one
+               chosen against a scale, and it put this button above both overlay
+               tiers. It floated over an open tray, unreported. */
+            z-index: var(--z-chrome);
             box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
             font-weight: bold;
             font-family: monospace;
@@ -580,72 +832,151 @@
             transform: scale(1) translateY(0);
         }
 
-        /* Enhanced Modal styles */
-        .modal-overlay {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.85);
-            z-index: 1000;
-            align-items: center;
-            justify-content: center;
-            opacity: 0;
-            transition: opacity var(--transition-speed) ease;
-            overflow-y: auto;
-            padding: 20px;
-            box-sizing: border-box;
-        }
+        /* The item's backdrop image, behind the fixed region of the detail
+           overlay. Renamed from .modal-backdrop by the tray conversion, because
+           that name now belongs to the overlay system's own scrim and the two
+           are different things: this is artwork, that is a dimming layer.
 
-        .modal-overlay.active {
-            display: flex;
-            opacity: 1;
-        }
-
-        .modal-content {
-            position: relative;
-            background-color: var(--secondary-bg);
-            border-radius: 16px;
-            max-width: 1000px;
-            width: 100%;
-            margin: auto;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
-            display: flex;
-            flex-direction: column;
-            max-height: 90vh;
-            transform: translateY(30px);
-            transition: transform var(--transition-speed) ease;
-            overflow: hidden;
-        }
-
-        .modal-backdrop {
+           `inset: 0` against .modal__fixed, NOT a height of its own. It used to
+           be `height: 280px` against the panel — a number sized for the desktop
+           dialog, where the identity block happens to be about that tall. On a
+           phone the panel is a tray and that number overshot the head by 214px
+           into the scrolling body, so the summary and cast slid underneath a
+           stationary picture. Filling its container instead makes the artwork's
+           extent a consequence of the layout rather than a constant that has to
+           be re-guessed for every viewport. */
+        .modal-backdrop-art {
             position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 280px;
+            inset: 0;
             background-size: cover;
             background-position: center center;
             opacity: 0.35;
             z-index: 0;
+            pointer-events: none;
+            /* Stay clear of the grab handle. The artwork still reaches the
+               panel's top edge — the full-bleed look is the point — but the
+               handle is the one affordance that dismisses a tray, and it was
+               rendering on top of a picture.
+
+               Note the FIRST stop holds transparent all the way to
+               --grip-clear, and only then fades. The earlier version ramped
+               straight from `transparent 0` to opaque at --grip-height, which
+               is the handle's LOWER edge — so the handle sat in the tail of the
+               ramp under artwork at 71-100% opacity. Clearing a region means
+               being clear across the whole of it and then some, not arriving at
+               clear by the time you reach its far side.
+
+               Moving the artwork's top down instead would leave a hard band of
+               bare surface above it, which reads as a gap rather than a design.
+
+               This is one half of the fix. Paint order is the other: the
+               artwork is positioned and the grip is not, so the artwork covers
+               it whatever the mask says. See `.modal__fixed .sheet__grip`.
+
+               A browser honouring neither property still has the grip lifted
+               above the artwork, so it degrades to a handle on a picture —
+               imperfect, but not invisible. */
+            -webkit-mask-image: linear-gradient(to bottom,
+                    transparent 0,
+                    transparent var(--grip-clear),
+                    #000 calc(var(--grip-clear) + var(--grip-height)));
+            mask-image: linear-gradient(to bottom,
+                    transparent 0,
+                    transparent var(--grip-clear),
+                    #000 calc(var(--grip-clear) + var(--grip-height)));
         }
 
-        .modal-backdrop::after {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(to bottom, rgba(42, 42, 42, 0.3) 0%, var(--secondary-bg) 100%);
+        /* Lift the grab handle above the item's artwork.
+           `.modal-backdrop-art` is positioned with `z-index: 0` and the grip is
+           in normal flow, so paint order puts the artwork on top regardless of
+           its opacity — the mask above was the only thing holding the line, and
+           it was miscalibrated. Both halves are needed: the mask alone loses to
+           paint order, and this alone leaves a grey handle on an arbitrary
+           photograph, making legibility a property of which item was opened.
+           `.modal-header` already does exactly this, for the same reason. */
+        .modal__fixed .sheet__grip {
+            position: relative;
+            z-index: 1;
         }
 
-        .modal-overlay.active .modal-content {
-            transform: translateY(0);
+        /* No divider under the item's title.
+
+           `.modal__head` draws a `border-bottom`, and that is right everywhere
+           else — the trailer, the roulette and the server switcher all sit their
+           head on flat surface, where a hairline separates two bands and reads
+           as structure. Here the head is painted over the item's backdrop
+           artwork, so the same hairline crosses a photograph and reads as a
+           seam. The eye finds it before it finds the title.
+
+           Scoped rather than removed from the base rule: taking it off globally
+           would flatten three overlays to fix one. `.modal-header`'s own border
+           stays too — that one marks where the fixed region stops and the
+           scrolling region begins, at the foot of the identity block, on surface
+           rather than on artwork. */
+        .modal__fixed .modal__head {
+            border-bottom: none;
         }
 
+        /* The fixed region of the detail overlay: grip, title bar and the item's
+           identity block. Positioned so the artwork above can fill it.
+
+           `flex: 0 0 auto` against .modal__body's `1 1 auto` is what makes the
+           division real — see the pairing in overlays.css. */
+        .modal__fixed {
+            position: relative;
+            flex: 0 0 auto;
+        }
+
+        /* The fixed region is bounded by CONSTRUCTION, not by its own scrollbar.
+
+           Giving it `overflow-y: auto` would be the obvious way to stop a long
+           title squeezing the summary out, and it is wrong: the region would
+           then BE a scroller, and `touch-action: none` on the grip and head
+           inside it is honoured only while they are not. It is also in the drag
+           gesture's selector list, so the browser and the gesture would both
+           claim the same downward swipe. That is the silent failure
+           `test_drag_regions_are_not_the_scroller` exists to catch, arrived at
+           from the other direction.
+
+           So the only part that can grow without limit is capped instead. The
+           poster has a fixed width and the metadata is short; clamping the title
+           bounds the whole region deterministically, with no scroller and
+           nothing clipped away. */
+        .modal__fixed .modal-title {
+            display: -webkit-box;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 3;
+            line-clamp: 3;
+            overflow: hidden;
+        }
+
+        /* The hamburger. Hidden by default; shown at ≤992px, paired with the
+           rule that withdraws the header's sort controls at that same width.
+           See the hand-off comment on that media query — the two belong
+           together, and splitting them is what opened the 769–992px band where
+           neither was reachable.
+
+           This rule was destroyed by the tray conversion: the script that
+           removed the retired `.mobile-menu` CSS matched on substrings, and
+           `.mobile-menu-button` contains `.mobile-menu`. The button lost its
+           `display: none` and appeared on desktop. */
+        .mobile-menu-button {
+            display: none;
+            width: 40px;
+            height: 40px;
+            background-color: transparent;
+            border: none;
+            color: var(--light-text);
+            font-size: 24px;
+            cursor: pointer;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* The item's identity block: poster, year, rating, duration, trailer.
+           Sits inside .modal__fixed, so it holds still while the summary, genres
+           and cast scroll beneath it. Its border is the division between the
+           two regions. `z-index: 1` lifts it over the artwork behind. */
         .modal-header {
             display: flex;
             align-items: flex-end;
@@ -671,13 +1002,25 @@
             display: block;
         }
 
-        .modal-title {
-            margin: 0 0 10px 0;
-            font-size: 2.2em;
-            color: var(--light-text);
-            font-weight: 700;
-            line-height: 1.1;
-        }
+        /* `.modal-title` sets no type of its own. The rule that stood here did,
+           and every declaration in it was dead: `.modal__head h2` is (0,1,1)
+           and this class is (0,1,0), so `margin`, `font-size` and `font-weight`
+           all lost, and `color` restated the inherited `#fff`. It survived from
+           before the tray conversion, when this class WAS the title's type.
+
+           One declaration did win — `line-height: 1.1` — and it is why the
+           detail overlay held its title 1.5px tighter below the grab handle
+           than the trays did. The gap the eye measures runs to the glyph, not
+           to the top of the line box, so a title's half-leading is part of it;
+           see `.sheet__title` in overlays.css. Four dead declarations around it
+           are what made the rule look authoritative enough that nobody read the
+           fifth.
+
+           Deleted rather than trimmed to one line, deliberately: a rule listing
+           the properties it does not control is where the next unwanted one
+           goes unnoticed. The two `font-size` overrides in the media queries
+           below went with it, for the same reason. `.modal__fixed .modal-title`
+           stays — its line clamp is what bounds the fixed region. */
 
         .modal-year {
             font-size: 1.2em;
@@ -699,30 +1042,6 @@
             border-radius: 6px;
             font-size: 0.9em;
             font-weight: 500;
-        }
-
-        .modal-close {
-            position: absolute;
-            top: 15px;
-            right: 15px;
-            width: 36px;
-            height: 36px;
-            border-radius: 50%;
-            background-color: rgba(0, 0, 0, 0.4);
-            border: none;
-            color: var(--light-text);
-            font-size: 20px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: background-color var(--transition-speed);
-            padding: 0;
-            z-index: 10;
-        }
-
-        .modal-close:hover {
-            background-color: rgba(255, 255, 255, 0.1);
         }
 
         /* Custom scrollbar styles */
@@ -751,18 +1070,6 @@
         * {
             scrollbar-width: thin;
             scrollbar-color: var(--primary-color) rgba(0, 0, 0, 0.2);
-            scroll-behavior: smooth;
-        }
-
-        .modal-body {
-            padding: 30px;
-            overflow-y: auto;
-            display: flex;
-            flex-direction: column;
-            gap: 30px;
-            max-height: calc(90vh - 180px);
-            position: relative;
-            z-index: 1;
             scroll-behavior: smooth;
         }
 
@@ -821,187 +1128,6 @@
 
         .genre-tag:hover {
             background-color: rgba(229, 160, 13, 0.3);
-        }
-
-        /* Mobile menu button */
-        .mobile-menu-button {
-            display: none;
-            width: 40px;
-            height: 40px;
-            background-color: transparent;
-            border: none;
-            color: var(--light-text);
-            font-size: 24px;
-            cursor: pointer;
-            align-items: center;
-            justify-content: center;
-        }
-
-        /* Mobile menu */
-        .mobile-menu {
-            position: fixed;
-            top: var(--mobile-header-height);
-            left: 0;
-            width: 100%;
-            background-color: var(--header-bg);
-            z-index: 99;
-            padding: 15px;
-            box-shadow: 0 5px 10px rgba(0, 0, 0, 0.2);
-            transform: translateY(-100%);
-            transition: all 0.3s ease;
-            opacity: 0;
-            visibility: hidden;
-        }
-
-        .mobile-menu.open {
-            transform: translateY(0);
-            opacity: 1;
-            visibility: visible;
-        }
-
-        .mobile-menu .tabs {
-            flex-direction: column;
-            width: 100%;
-        }
-
-        .mobile-menu .tab {
-            width: 100%;
-            text-align: center;
-            padding: 12px;
-            border-radius: 8px;
-        }
-
-        /* Sort toggle for mobile menu */
-        .mobile-menu .sort-toggle {
-            display: flex;
-            margin-top: 15px;
-            margin-left: 0;
-            justify-content: center;
-            width: 100%;
-            flex-direction: column;
-            gap: 10px;
-        }
-
-        .mobile-menu .sort-row {
-            display: flex;
-            width: 100%;
-            gap: 10px;
-            justify-content: center;
-        }
-
-        .mobile-menu .sort-button {
-            flex: 1;
-            justify-content: center;
-            padding: 10px;
-            min-width: 80px;
-        }
-
-        .mobile-menu #mobile-genre-button {
-            width: 100%;
-            margin-top: 5px;
-        }
-
-        /* NEW MOBILE GENRE DRAWER */
-        .genre-drawer-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: rgba(0, 0, 0, 0.7);
-            z-index: 1001;
-            display: none;
-            opacity: 0;
-            transition: opacity 0.3s ease;
-        }
-
-        .genre-drawer-overlay.open {
-            display: block;
-            opacity: 1;
-        }
-
-        .genre-drawer {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            width: 100%;
-            background-color: var(--secondary-bg);
-            border-radius: 16px 16px 0 0;
-            z-index: 1002;
-            transform: translateY(100%);
-            transition: transform 0.3s ease;
-            box-shadow: 0 -5px 20px rgba(0, 0, 0, 0.3);
-            max-height: 70vh;
-            display: flex;
-            flex-direction: column;
-        }
-
-        .genre-drawer.open {
-            transform: translateY(0);
-        }
-
-        .genre-drawer-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 20px;
-            border-bottom: 1px solid var(--border-color);
-            position: relative;
-        }
-
-        .genre-drawer-title {
-            font-size: 1.2rem;
-            font-weight: 600;
-            color: var(--light-text);
-            flex: 1;
-            text-align: center;
-        }
-
-        .genre-drawer-close {
-            position: absolute;
-            right: 15px;
-            top: 15px;
-            width: 30px;
-            height: 30px;
-            background-color: rgba(0, 0, 0, 0.3);
-            border: none;
-            border-radius: 50%;
-            color: var(--light-text);
-            font-size: 18px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-        }
-
-        .genre-drawer-content {
-            overflow-y: auto;
-            padding: 10px 0;
-            max-height: calc(70vh - 70px);
-        }
-
-        .genre-drawer .genre-item {
-            padding: 15px 20px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .genre-drawer .genre-item:last-child {
-            border-bottom: none;
-        }
-
-        .genre-drawer .genre-item.active {
-            background-color: var(--primary-light);
-        }
-
-        /* Apply drawer to mobile genre buttons */
-        @media screen and (max-width: 992px) {
-            .sort-toggle .genre-dropdown .genre-menu {
-                display: none !important;
-                /* Never show dropdown menu on mobile */
-            }
         }
 
         /* No results message */
@@ -1152,7 +1278,10 @@
             font-size: 0.9rem;
             opacity: 0;
             transition: opacity 0.3s;
-            z-index: 90;
+            /* Page chrome. It reports on a swipe over the grid, which is a page
+               interaction — while an overlay is open the page is not what the
+               user is acting on, so this belongs under the overlay tiers. */
+            z-index: var(--z-chrome);
             pointer-events: none;
             box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
             text-align: center;
@@ -1161,9 +1290,38 @@
         }
 
         /* Mobile responsiveness */
+
+        /* Below this width the header cannot hold logo + search + two tabs +
+           four sort controls: the tabs row overflows .header-content at 850px
+           and the search container is down to 54px well before that. So the
+           page copy withdraws and the Actions overlay carries these instead.
+
+           `.header-content` is load-bearing, not decoration. The Actions
+           overlay's body IS a `.sort-toggle`, and it is teleported to <body> —
+           so an unqualified selector here matches it too and empties the
+           overlay it was never aimed at. That is exactly what happened: the
+           overlay opened with its handle, its title, and nothing else.
+
+           The two rules below are one hand-off and must move together. The
+           trigger appears at the same width the controls leave, or there is a
+           band with neither — which there was, from 769px to 992px, where a
+           tablet had no sort, no genre filter and no server switch at all. */
         @media screen and (max-width: 992px) {
-            .sort-toggle {
+            .header-content .sort-toggle {
                 display: none;
+            }
+
+            /* It opens the Actions overlay. Above 768px that overlay presents
+               as a centred dialog rather than a bottom tray — see the
+               pointer block in overlays.css — which is the right shape for a
+               tablet and needs no special casing here.
+
+               This rule was destroyed once already: the script that removed the
+               retired `.mobile-menu` CSS matched on substrings, and
+               `.mobile-menu-button` contains `.mobile-menu`. */
+            .mobile-menu-button {
+                display: flex;
+                order: 3;
             }
         }
 
@@ -1207,17 +1365,11 @@
                 display: none;
             }
 
-            .mobile-menu-button {
-                display: flex;
-                order: 3;
-            }
-
-            .mobile-menu {
-                display: block;
-            }
-
+            /* No margin-top. It was clearance for the close × that used to float
+               in this panel's top corner; on touch that button is hidden and the
+               grip and title bar sit above this block anyway, so the 40px was
+               spending the fixed region's height budget on nothing. */
             .modal-header {
-                margin-top: 40px;
                 padding: 20px;
                 gap: 20px;
             }
@@ -1229,21 +1381,10 @@
                 align-self: center;
             }
 
-            .modal-title {
-                font-size: 1.5em;
-
-            }
-
             .media-title {
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
-            }
-
-            .modal-body {
-                padding: 20px;
-                gap: 20px;
-                scroll-behavior: smooth;
             }
 
             .cast-grid {
@@ -1305,18 +1446,6 @@
                 font-size: 0.75em;
             }
 
-            .modal-header {
-                margin-top: 40px;
-            }
-
-            .modal-title {
-                font-size: 1.4em;
-            }
-
-            .modal-body {
-                scroll-behavior: smooth;
-            }
-
             .modal-section-title {
                 font-size: 1.1em;
             }
@@ -1336,13 +1465,6 @@
             .search-container {
                 max-width: 100%;
             }
-        }
-
-        /* Hide scroll-to-top when modal is open */
-        .modal-overlay.active~.scroll-to-top {
-            display: none !important;
-            opacity: 0;
-            visibility: hidden;
         }
 
         .logo-icon img {
@@ -1408,18 +1530,6 @@
             .server-toggle .server-text {
                 display: none;
             }
-
-            /* Show text for mobile menu toggle */
-            .mobile-menu .server-toggle-button .server-text {
-                display: inline !important;
-            }
-
-            .mobile-menu .server-toggle-button {
-                width: 100%;
-                justify-content: center;
-                margin-top: 10px;
-                padding: 10px;
-            }
         }
 
         @media screen and (max-width: 480px) {
@@ -1428,19 +1538,66 @@
             }
         }
 
-        /* Mobile server toggle styling */
-        @media screen and (max-width: 768px) {
-            .mobile-menu .server-toggle-button {
-                width: 100%;
-                justify-content: center;
-                margin-top: 10px;
-                padding: 10px;
-            }
+        /* ---- The Actions overlay's control list -------------------------
+           The overlay reuses the header's `.sort-toggle` markup, and the header
+           lays that out as a horizontal row of pills. In an overlay it is a
+           stacked list, so the direction has to be restated here.
+
+           This was invisible until the overlay stopped being empty: with the
+           block hidden by the unqualified `display: none` above, nothing showed
+           that its four children were running off the right edge — measured at
+           390px, the body's scrollWidth was 524 against a client width of 388,
+           putting "Switch server" and "Install App" past the panel entirely.
+
+           Scoped on `.sheet__body` and deliberately NOT wrapped in a media
+           query. The overlay is an overlay at every width it appears, and it now
+           appears from 992px down; a breakpoint here would only be a second
+           number to keep in step with the hand-off above. */
+        .sheet__body .sort-toggle {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 10px;
+            margin-left: 0;
+        }
+
+        /* The two sort options are alternatives to each other, so they sit side
+           by side and split the width. Everything below them is its own action
+           and gets its own line. `.sort-row` carries no styling outside an
+           overlay — it exists only to make this pairing possible. */
+        .sheet__body .sort-row {
+            display: flex;
+            gap: 10px;
+        }
+
+        .sheet__body .sort-row .sort-button {
+            flex: 1;
+        }
+
+        /* `align-self` is restated, not inherited from the container's
+           `align-items: stretch`. The install button carries
+           `align-self: center` of its own, which wins against the container and
+           left it sitting at its intrinsic width in a column of full-width
+           controls. */
+        .sheet__body .sort-button {
+            align-self: stretch;
+            justify-content: center;
+            padding: 10px;
         }
     </style>
 </head>
 
-<body>
+<!-- One Alpine scope on <body> owns every overlay's open state.
+
+     Deliberately flat rather than a scope per overlay: overlays here open each
+     other — the menu opens the genre tray, the detail tray opens the trailer —
+     and sibling scopes cannot see one another's state, so each hand-off would
+     need an event. A single scope is honest about the fact that these six are
+     one system.
+
+     `overlaysOpen` is not read by the scroll lock or the focus manager; both
+     watch the DOM instead, so an overlay added later is covered without being
+     registered here. See overlays.js. -->
+<body x-data="{ menuOpen: false, genreOpen: false, serverOpen: false, detailOpen: false, trailerOpen: false, rouletteOpen: false }">
     <div class="header">
         <div class="header-content">
             <div class="logo-section">
@@ -1463,73 +1620,173 @@
                     <button class="sort-button" data-sort="date">
                         <span class="sort-icon">📅 Date Added ▼</span>
                     </button>
-                    <!-- Genre filter dropdown -->
-                    <div class="genre-dropdown">
-                        <button class="sort-button genre-button" data-filter="genre">
-                            <span class="sort-icon">🏷️ Genre</span>
-                        </button>
-                        <div class="genre-menu">
-                            <div class="genre-item active" data-genre="all">All Genres</div>
-                            <!-- Genre items will be populated dynamically -->
-                        </div>
-                    </div>
-                    <!-- Server Toggle (only shows when both servers configured) -->
+                    <!-- Genre filter. One control at every width now: this
+                         opens the same tray the phone does, instead of a
+                         CSS dropdown that had to be built and maintained
+                         separately from the drawer. -->
+                    <button class="sort-button genre-button" x-ref="genreTrigger"
+                        @click="genreOpen = true" aria-haspopup="dialog">
+                        <span class="sort-icon">🏷️ Genre</span>
+                    </button>
+                    <!-- Server Toggle (only shows when 2+ servers configured) -->
                     <div class="server-toggle">
-                        <button class="server-toggle-button" onclick="toggleServer()">
+                        <button class="server-toggle-button" x-ref="serverTrigger">
                             <span class="server-icon">🔄</span>
-                            <span class="server-text">Switch to SERVER_NAME</span>
+                            <span class="server-text">Switch server</span>
                         </button>
                     </div>
                 </div>
             </div>
-            <button class="mobile-menu-button" aria-label="Menu">☰</button>
+            <button class="mobile-menu-button" aria-label="Menu" x-ref="menuTrigger"
+                @click="menuOpen = true" aria-haspopup="dialog">☰</button>
         </div>
     </div>
 
-    <!-- Mobile Menu -->
-    <div class="mobile-menu">
-        <div class="tabs">
-            <div class="tab active" data-content="movies">Movies</div>
-            <div class="tab" data-content="tvshows">TV Shows</div>
-        </div>
-        <!-- Sort toggle for mobile menu -->
-        <div class="sort-toggle">
-            <div class="sort-row">
-                <button class="sort-button active" data-sort="alpha">
-                    <span class="sort-icon">A-Z</span>
-                </button>
-                <button class="sort-button" data-sort="date">
-                    <span class="sort-icon">📅 Date Added ▼</span>
-                </button>
+    <!-- ============ Actions tray (phone navigation) ============
+         Teleported to <body>, and that is load-bearing rather than tidiness.
+
+         This markup lives inside the overlay scope on <body>, but the header is
+         a candidate to become a translucent surface, and `backdrop-filter`
+         makes an element a containing block for its fixed-position descendants
+         — the same rule that catches `transform`. The moment that happens, a
+         `position: fixed; inset: 0` tray nested in the header stops resolving
+         against the viewport and renders squashed into the height of the bar
+         that opened it.
+
+         Keeping it teleported means that change can never reintroduce the bug.
+         It renders correctly either way on a desktop viewport, because the tray
+         is hidden there — which is exactly what makes this easy to "simplify"
+         into a fault nobody sees until they test on a phone. -->
+    <template x-teleport="body">
+        <div class="sheet" x-show="menuOpen" x-cloak style="display:none"
+            x-transition:enter="overlay-opening" x-transition:enter-start="overlay-shut"
+            x-transition:enter-end="overlay-shown" x-transition:leave="overlay-closing"
+            x-transition:leave-start="overlay-shown" x-transition:leave-end="overlay-shut"
+            @keydown.escape.window="menuOpen = false">
+            <div class="sheet__backdrop" @click="menuOpen = false"></div>
+            <div class="sheet__panel" role="dialog" aria-modal="true" aria-label="Actions"
+                tabindex="-1">
+                <div class="sheet__grip"><span class="sheet__handle"></span></div>
+                <div class="sheet__head">
+                    <!-- "Actions", not "Menu": these are things to do, not
+                         places to go. -->
+                    <span class="sheet__title">Actions</span>
+                    <!-- This tray had NO dismissal affordance above 768px. It
+                         carries only a grip, and the pointer block hides the
+                         grip because a mouse has no drag to make — so between
+                         769px and 992px, where the hamburger is still shown and
+                         this opens as a centred dialog, there was neither a
+                         handle nor a ×. Backdrop and Escape still worked, but
+                         nothing on screen said so.
+
+                         That band is the same one the sort/genre hand-off left
+                         empty when its two rules drifted apart. Overlays lose
+                         affordances at the seams between breakpoints, which is
+                         why the test asserts every panel keeps one on both
+                         sides of the touch breakpoint. -->
+                    <button class="overlay__close" @click="menuOpen = false"
+                        aria-label="Close">×</button>
+                </div>
+                <div class="sheet__body menu__body">
+                    <!-- No Movies / TV Shows entries here. Switching content type
+                         is a horizontal swipe on the grid, and the header tabs
+                         are hidden at this width; listing them again made the
+                         tray look like the only way to do it. The swipe is the
+                         interaction, and it already works. -->
+                    <div class="sort-toggle">
+                        <div class="sort-row">
+                            <button class="sort-button active" data-sort="alpha"
+                                @click="menuOpen = false">
+                                <span class="sort-icon">A-Z</span>
+                            </button>
+                            <button class="sort-button" data-sort="date" @click="menuOpen = false">
+                                <span class="sort-icon">📅 Date Added ▼</span>
+                            </button>
+                        </div>
+                        <!-- Focus moves to the trigger BEFORE this tray hides.
+                             Alpine hides on the flush after the handler, and
+                             hiding a focused element hands its focus to <body>
+                             — which the focus manager reads a frame later to
+                             decide where to return focus, and an origin rooted
+                             at the body is the one case it declines to restore.
+                             Without this, the genre tray opens correctly, focus
+                             lands in it correctly, and dismissing it drops the
+                             keyboard user at the top of the page. Nothing
+                             errors and the pointer path looks perfect. -->
+                        <button class="sort-button genre-button"
+                            @click="$refs.menuTrigger.focus(); menuOpen = false; genreOpen = true"
+                            aria-haspopup="dialog">
+                            <span class="sort-icon">🏷️ Genre</span>
+                        </button>
+                        <button class="sort-button server-toggle-button" x-ref="serverTriggerMobile">
+                            <span class="server-icon">🔄</span>
+                            <span class="server-text">Switch server</span>
+                        </button>
+                        <button class="sort-button install-button mobile-install-button"
+                            @click="menuOpen = false">
+                            <span class="install-icon">📱</span>
+                            <span class="install-text">Install App</span>
+                        </button>
+                    </div>
+                </div>
             </div>
-            <!-- Mobile Genre button - now triggers drawer -->
-            <button class="sort-button genre-button" id="mobile-genre-button">
-                <span class="sort-icon">🏷️ Genre</span>
-            </button>
-            <!-- Mobile Server Toggle (only shows when both servers configured) -->
-            <button class="sort-button server-toggle-button"
-                onclick="toggleServer(); mobileMenu.classList.remove('open');">
-                <span class="server-icon">🔄</span>
-                <span class="server-text">Switch to SERVER_NAME</span>
-            </button>
-            <!-- Mobile Install Button (will be shown/hidden by JavaScript) -->
-            <button class="sort-button install-button mobile-install-button">
-                <span class="install-icon">📱</span>
-                <span class="install-text">Install App</span>
-            </button>
+        </div>
+    </template>
+
+    <!-- ============ Genre tray ============
+         One implementation, both widths. This replaces BOTH the desktop
+         `.genre-menu` dropdown and the phone `.genre-drawer` — two
+         implementations of one control, which is why every genre feature in
+         this app had to be written twice. -->
+    <div class="sheet" x-show="genreOpen" x-cloak style="display:none"
+        x-transition:enter="overlay-opening" x-transition:enter-start="overlay-shut"
+        x-transition:enter-end="overlay-shown" x-transition:leave="overlay-closing"
+        x-transition:leave-start="overlay-shown" x-transition:leave-end="overlay-shut"
+        @keydown.escape.window="genreOpen = false">
+        <div class="sheet__backdrop" @click="genreOpen = false"></div>
+        <div class="sheet__panel" role="dialog" aria-modal="true" aria-label="Select genre"
+            tabindex="-1">
+            <div class="sheet__grip"><span class="sheet__handle"></span></div>
+            <div class="sheet__head">
+                <span class="sheet__title">Genre</span>
+                <button class="overlay__close" @click="genreOpen = false"
+                    aria-label="Close">×</button>
+            </div>
+            <div class="sheet__body genre-tray__body">
+                <!-- Populated entirely by updateGenreList(), including the
+                     all-genres entry — it is the first thing genreItem() builds.
+
+                     An authored copy of that entry used to sit here, described
+                     as "the one fixed member". It was not: updateGenreList()
+                     clears this body before it fills it, so the markup was wiped
+                     on every run and never seen. Worse, it was a bare <div> that
+                     no code ever bound, so on the one path where the generated
+                     list failed to arrive it would have offered a dead control
+                     rather than an empty tray. -->
+            </div>
         </div>
     </div>
 
-    <!-- NEW MOBILE GENRE DRAWER -->
-    <div class="genre-drawer-overlay">
-        <div class="genre-drawer">
-            <div class="genre-drawer-header">
-                <div class="genre-drawer-title">Select Genre</div>
-                <button class="genre-drawer-close">×</button>
+    <!-- ============ Server switcher tray ============
+         Shown only when three servers are configured; with two the header
+         control is a direct toggle and this never opens. renderServerSwitcher()
+         decides which. -->
+    <div class="sheet" x-show="serverOpen" x-cloak style="display:none"
+        x-transition:enter="overlay-opening" x-transition:enter-start="overlay-shut"
+        x-transition:enter-end="overlay-shown" x-transition:leave="overlay-closing"
+        x-transition:leave-start="overlay-shown" x-transition:leave-end="overlay-shut"
+        @keydown.escape.window="serverOpen = false">
+        <div class="sheet__backdrop" @click="serverOpen = false"></div>
+        <div class="sheet__panel" role="dialog" aria-modal="true" aria-label="Switch server"
+            tabindex="-1">
+            <div class="sheet__grip"><span class="sheet__handle"></span></div>
+            <div class="sheet__head">
+                <span class="sheet__title">Switch server</span>
+                <button class="overlay__close" @click="serverOpen = false"
+                    aria-label="Close">×</button>
             </div>
-            <div class="genre-drawer-content">
-                <!-- Genre items will be populated dynamically -->
-                <div class="genre-item active" data-genre="all">All Genres</div>
+            <div class="sheet__body server-tray__body">
+                <!-- Populated from config.json by renderServerSwitcher(). -->
             </div>
         </div>
     </div>
@@ -1565,25 +1822,63 @@
     <!-- Swipe Indicator -->
     <div class="swipe-indicator"></div>
 
-    <!-- Modal -->
-    <div class="modal-overlay">
-        <div class="modal-content">
-            <div class="modal-backdrop"></div>
-            <button class="modal-close" aria-label="Close modal">×</button>
-            <div class="modal-header">
-                <div class="modal-poster">
-                    <!-- Poster will be populated dynamically -->
+    <!-- ============ Media detail ============
+         A tray on a phone, a centred dialog on a pointer device — the
+         `modal--tray-on-touch` modifier is what selects between them.
+
+         The previous presentation was a centred box at every width, which put
+         its close control in a top corner: the hardest part of a phone screen
+         to reach one-handed, and the reason the tray shape exists. On touch the
+         grab handle replaces that ×, and a downward swipe dismisses. -->
+    <div class="modal modal--tray-on-touch" x-show="detailOpen" x-cloak style="display:none"
+        x-transition:enter="overlay-opening" x-transition:enter-start="overlay-shut"
+        x-transition:enter-end="overlay-shown" x-transition:leave="overlay-closing"
+        x-transition:leave-start="overlay-shown" x-transition:leave-end="overlay-shut"
+        @keydown.escape.window="detailOpen = false">
+        <div class="modal__backdrop" @click="detailOpen = false"></div>
+        <div class="modal__panel modal__panel--wide" role="dialog" aria-modal="true"
+            aria-labelledby="detail-title" tabindex="-1">
+            <!-- The FIXED region. Everything that identifies the item holds
+                 still; only the prose below it scrolls.
+
+                 It is a real element rather than `position: sticky` on the
+                 poster block, and that is load-bearing twice over.
+
+                 A sticky element is still inside the scroller, so
+                 `touch-action: none` on it cannot be honoured — the browser
+                 takes the downward drag back as a scroll, silently, which is the
+                 trap `test_drag_regions_are_not_the_scroller` exists to catch.
+                 And the artwork needs an element whose box it can fill; with a
+                 sticky child there is nothing for it to key to, which is how it
+                 ended up a hardcoded 280px that overshot the head by 214px and
+                 sat behind scrolling content. -->
+            <div class="modal__fixed">
+                <div class="sheet__grip"><span class="sheet__handle"></span></div>
+                <!-- The item's backdrop art. Absolutely positioned and inert; it
+                     is texture, not content. `inset: 0` against this container
+                     rather than a fixed height against the panel, so it cannot
+                     reach the scrolling region for any content at any width. -->
+                <div class="modal-backdrop-art" aria-hidden="true"></div>
+                <div class="modal__head">
+                    <h2 id="detail-title" class="modal-title">Title</h2>
+                    <button class="overlay__close" @click="detailOpen = false"
+                        aria-label="Close">×</button>
                 </div>
-                <div class="modal-title-section">
-                    <h2 class="modal-title">Movie Title</h2>
-                    <div class="modal-year">2023</div>
-                    <div class="modal-metadata">
-                        <div class="metadata-item" id="modal-rating">PG-13</div>
-                        <div class="metadata-item" id="modal-duration">120 min</div>
+                <div class="modal-header">
+                    <div class="modal-poster">
+                        <!-- Poster populated by openModal() -->
+                    </div>
+                    <div class="modal-title-section">
+                        <div class="modal-year">2023</div>
+                        <div class="modal-metadata">
+                            <div class="metadata-item" id="modal-rating">PG-13</div>
+                            <div class="metadata-item" id="modal-duration">120 min</div>
+                        </div>
+                        <div class="modal-actions"></div>
                     </div>
                 </div>
             </div>
-            <div class="modal-body">
+            <div class="modal__body">
                 <div class="modal-section summary-section">
                     <div class="modal-section-title">Overview</div>
                     <div id="modal-summary">Loading summary...</div>
@@ -1592,17 +1887,16 @@
                 <div class="modal-section">
                     <div class="modal-section-title">Genres</div>
                     <div class="genres-list" id="modal-genres">
-                        <!-- Genres will be added here -->
+                        <!-- Genres populated by openModal() -->
                     </div>
                 </div>
 
                 <div class="modal-section">
                     <div class="modal-section-title">Cast</div>
                     <div class="cast-grid" id="modal-cast">
-                        <!-- Cast members will be added here -->
+                        <!-- Cast populated by openModal() -->
                     </div>
                 </div>
-
             </div>
         </div>
     </div>
@@ -1610,12 +1904,220 @@
     <button class="scroll-to-top" aria-label="Scroll to top"></button>
 
     <script>
+        // ============ CONFIG ADAPTER (continued) ============
+        // The single configuration store. Read once, at boot, from the copy the
+        // parser-blocking script in <head> already fetched — never re-fetched,
+        // because configuration cannot change without a container restart and a
+        // second read is only an opportunity for two parts of the app to
+        // disagree about what it says.
+        const CONFIG = window.GLIMPSE.config;
+        const ACTIVE_SERVER = window.GLIMPSE.activeServer;
+
+        /**
+         * Report a configuration failure and stop.
+         *
+         * Deliberately NOT a fallback to defaults. A silent fallback here
+         * reproduces exactly the failure this change removed: a misconfigured
+         * install that looks like a working one, quietly showing the wrong
+         * library — or an empty one indistinguishable from a server with no
+         * media.
+         */
+        function reportConfigError(detail) {
+            document.body.innerHTML =
+                '<div class="config-error" role="alert">' +
+                '<h2>Glimpse is not configured</h2>' +
+                '<p>The application could not read <code>/config.json</code>, ' +
+                'which the container generates at startup.</p>' +
+                '<p>This usually means the entrypoint did not finish. Check the ' +
+                'container logs with <code>docker logs glimpse-media-viewer</code>.</p>' +
+                '<p><small>' + detail + '</small></p>' +
+                '</div>';
+        }
+
+        /** The active server's entry from config.json. */
+        function activeServerConfig() {
+            return CONFIG.servers.find(server => server.id === ACTIVE_SERVER);
+        }
+
+        /**
+         * Resolve a snapshot path for the active server.
+         *
+         * Absolute, always. This is what lets one index.html serve `/` and
+         * `/jellyfin/` alike: a relative `data/...` resolves against the
+         * document, so it would mean two different URLs on those two routes.
+         * Rewriting every path per route is precisely what create_server_index()
+         * existed to do, and why there were four copies of this file.
+         */
+        function dataUrl(...segments) {
+            return '/' + activeServerConfig().dataPath + '/' + segments.join('/');
+        }
+
         let moviesData = [];
         let tvShowsData = [];
+        // Initial value; overwritten from config.json by applyConfig() below,
+        // which is what the entrypoint used to do by substituting this line.
         let currentSortMethod = 'alpha'; // Default sorting method: 'alpha' or 'date'
         let currentGenre = 'all'; // Default genre filter: 'all' or specific genre
         let allGenres = { movies: {}, tvshows: {} }; // Store all unique genres and their counts
         let isMobileView = window.innerWidth < 992; // Track if we're in mobile view
+
+        /**
+         * Apply everything the entrypoint used to bake into this file with sed:
+         * the title, the heading, the default sort, the icons, and the switcher.
+         */
+        function applyConfig() {
+            const server = activeServerConfig();
+
+            // Title carries the server name; the heading does not. Set from the
+            // config rather than edited in place, so it never accumulates a
+            // second server name the way repeated sed runs could.
+            document.title = CONFIG.appTitle + ' - ' + server.name;
+
+            const heading = document.querySelector('.logo-section h1');
+            if (heading) {
+                const logo = heading.querySelector('.logo-icon');
+                heading.textContent = '';
+                if (logo) heading.appendChild(logo);
+                heading.appendChild(document.createTextNode(CONFIG.appTitle));
+            }
+
+            if (CONFIG.sortByDateAdded === true) {
+                currentSortMethod = 'date';
+            }
+
+            applyServerIcons(server.id);
+            renderServerSwitcher();
+        }
+
+        /**
+         * Point the icons and logo at the active server's set.
+         *
+         * The one part of theming a custom property cannot express: a
+         * <link rel="icon"> needs a real address. This is DOM work on a parsed
+         * document — idempotent, and leaving nothing on disk — not sed over a
+         * file.
+         */
+        function applyServerIcons(serverId) {
+            const base = serverId === 'plex' ? '/images' : '/images/' + serverId;
+
+            const icons = {
+                'link[rel="apple-touch-icon"]': '/apple-touch-icon.png',
+                'link[rel="icon"][sizes="32x32"]': '/favicon-32x32.png',
+                'link[rel="icon"][sizes="16x16"]': '/favicon-16x16.png',
+                'link[rel="icon"][sizes="192x192"]': '/android-chrome-192x192.png',
+                'link[rel="icon"][sizes="512x512"]': '/android-chrome-592x592.png',
+            };
+
+            for (const [selector, file] of Object.entries(icons)) {
+                const link = document.head.querySelector(selector);
+                if (link) link.href = base + file;
+            }
+
+            const logo = document.querySelector('.logo-icon img');
+            if (logo) logo.src = base + '/logo.png';
+
+            // Keep the document's theme-color in step with the generated
+            // manifest: they drive the same surfaces, so a disagreement shows
+            // as a colour change when the app is installed.
+            const themeColors = { plex: '#131313', jellyfin: '#101010', emby: '#0f1419' };
+            const meta = document.head.querySelector('meta[name="theme-color"]');
+            if (meta) meta.content = themeColors[serverId];
+        }
+
+        /** Servers other than the active one — the switcher's destinations. */
+        function otherServers() {
+            return CONFIG.servers.filter(server => server.id !== ACTIVE_SERVER);
+        }
+
+        /** Where a server is browsed. The primary server lives at the root. */
+        function serverPath(serverId) {
+            return serverId === CONFIG.primaryServer ? '/' : '/' + serverId + '/';
+        }
+
+        /**
+         * Show a switcher matching how many servers are configured: nothing for
+         * one, a toggle for two, a menu for three.
+         *
+         * The markup carries SERVER_NAME placeholders that the entrypoint used
+         * to substitute — and `toggleServer()` used to hardcode a Plex/Jellyfin
+         * pair, so a Plex+Emby install could not switch back at all. Both are
+         * fixed by driving this from config.json.
+         */
+        function renderServerSwitcher() {
+            const others = otherServers();
+
+            document.querySelectorAll('.server-toggle-button').forEach(button => {
+                if (others.length === 0) {
+                    // One server: there is nowhere to switch to. Remove the
+                    // control rather than disabling it — a control that can
+                    // never do anything is not unavailable, it is absent.
+                    const wrapper = button.closest('.server-toggle');
+                    (wrapper || button).remove();
+                    return;
+                }
+
+                const target = others[0];
+                const label = button.querySelector('.server-text');
+                if (label) {
+                    label.textContent = others.length === 1
+                        ? 'Switch to ' + target.name
+                        : 'Switch server';
+                }
+
+                button.classList.add('configured');
+                const wrapper = button.closest('.server-toggle');
+                if (wrapper) wrapper.classList.add('configured');
+
+                if (others.length === 1) {
+                    // Two servers: no choice to present, so present none.
+                    button.onclick = () => switchToServer(target.id);
+                    button.removeAttribute('aria-haspopup');
+                } else {
+                    button.setAttribute('aria-haspopup', 'dialog');
+                    button.onclick = () => {
+                        // Focus first, then close the Actions tray, then open
+                        // this one — see the note on the genre trigger in the
+                        // Actions tray markup. This button exists in both the
+                        // header and that tray; from inside the tray, opening
+                        // without moving focus first leaves the keyboard user
+                        // at the top of the page when the server tray closes.
+                        button.focus();
+                        setOverlay('menuOpen', false);
+                        setOverlay('serverOpen', true);
+                    };
+                }
+            });
+
+            populateServerTray(others);
+        }
+
+        /** Fill the server tray from config.json. */
+        function populateServerTray(others) {
+            const body = document.querySelector('.server-tray__body');
+            if (!body) return;
+
+            body.innerHTML = '';
+            others.forEach(server => {
+                const item = document.createElement('button');
+                item.type = 'button';
+                item.className = 'genre-item server-item';
+                item.innerHTML = '<span class="genre-item__label"></span>';
+                item.querySelector('.genre-item__label').textContent = server.name;
+                item.addEventListener('click', () => switchToServer(server.id));
+                body.appendChild(item);
+            });
+        }
+
+        /**
+         * Navigate to another server.
+         *
+         * No service-worker cache-clearing handshake any more: the cache is
+         * keyed by server, so there is nothing to race. See sw.js.
+         */
+        function switchToServer(serverId) {
+            window.location.href = serverPath(serverId);
+        }
+        // ============ END OF CONFIG ADAPTER ============
 
         // Function to check if device is mobile/tablet
         function checkMobileView() {
@@ -1688,22 +2190,31 @@
             threshold: 0.01
         });
 
-        // Mobile menu functionality
-        const mobileMenuButton = document.querySelector('.mobile-menu-button');
-        const mobileMenu = document.querySelector('.mobile-menu');
+        /**
+         * Overlay open state lives in the Alpine scope on <body>.
+         *
+         * These helpers exist so the app's own code — which is not inside an
+         * Alpine expression — can open and close overlays without reaching for
+         * class toggles. The click-outside handlers, the "is it open" checks and
+         * the manual class juggling that used to live here are all gone: a
+         * backdrop click, Escape, and the swipe gesture are handled by the
+         * overlay system itself.
+         */
+        function overlayScope() {
+            return Alpine.$data(document.body);
+        }
 
-        mobileMenuButton.addEventListener('click', () => {
-            mobileMenu.classList.toggle('open');
-        });
+        function setOverlay(name, open) {
+            // Alpine may not have initialised on a very early call; there is no
+            // overlay to open yet in that case, so dropping it is correct.
+            if (typeof Alpine === 'undefined') return;
+            overlayScope()[name] = open;
+        }
 
-        // Close mobile menu when clicking outside
-        document.addEventListener('click', (e) => {
-            if (mobileMenu.classList.contains('open') &&
-                !mobileMenu.contains(e.target) &&
-                !mobileMenuButton.contains(e.target)) {
-                mobileMenu.classList.remove('open');
-            }
-        });
+        function isOverlayOpen(name) {
+            if (typeof Alpine === 'undefined') return false;
+            return overlayScope()[name] === true;
+        }
 
         // Function to switch tabs - UPDATED TO MAINTAIN GENRE FILTER
         function switchTab(contentName) {
@@ -1741,14 +2252,14 @@
             // Apply the current search and sort to the newly selected tab content
             filterAndSortMedia(currentSearchTerm);
 
-            // Close mobile menu if open
-            mobileMenu.classList.remove('open');
+            // Close the Actions tray if it is open
+            setOverlay('menuOpen', false);
 
-            // Scroll to top when switching tabs
-            window.scrollTo({
-                top: 0,
-                behavior: 'smooth'
-            });
+            /* Scroll to top when switching tabs. Routed through the overlay
+               system because the line above admits an overlay may be open, and
+               a direct scroll would be discarded in exactly that case. With
+               nothing open this behaves identically. */
+            window.GlimpseOverlays.scrollPageTo(0);
         }
 
         // Tab switching - update for both desktop and mobile tabs
@@ -1816,12 +2327,10 @@
             // Update genre button label and active state - for both desktop and mobile
             document.querySelectorAll('.genre-button').forEach(button => {
                 if (genre !== 'all') {
-                    // Don't update the text of the mobile drawer button - it's always just "Genre"
-                    if (button.id !== 'mobile-genre-button') {
-                        button.innerHTML = `<span class="sort-icon">🏷️ <span class="selected-genre">${genre}</span></span>`;
-                    } else {
-                        button.innerHTML = `<span class="sort-icon">🏷️ ${genre}</span>`;
-                    }
+                    // One label for every genre trigger now. The drawer button
+                    // used to be special-cased to stay reading "Genre"; with a
+                    // single control at both widths there is nothing to diverge.
+                    button.innerHTML = `<span class="sort-icon">🏷️ <span class="selected-genre">${genre}</span></span>`;
                     button.classList.add('active');
                     document.body.classList.add('sort-by-genre');
                 } else {
@@ -1844,114 +2353,86 @@
             const currentSearchTerm = document.querySelector('.search-input').value.toLowerCase();
             filterAndSortMedia(currentSearchTerm);
 
-            // Close genre drawer if it's open
-            closeGenreDrawer();
+            // Choosing a genre dismisses the tray.
+            setOverlay('genreOpen', false);
         }
 
-        // Add event listeners to sort buttons
-        document.querySelectorAll('.sort-button').forEach(button => {
-            if (button.dataset.sort) {  // Only for actual sort buttons, not genre buttons
-                button.addEventListener('click', () => {
+        /**
+         * Bind the sort controls.
+         *
+         * `onclick =` rather than addEventListener, and that is the whole reason
+         * this is a function: assignment REPLACES, so running this pass twice
+         * binds once. It has to be safe to re-run, because it is — see
+         * bindRelocatedControls() below.
+         */
+        function bindSortButtons() {
+            document.querySelectorAll('.sort-button').forEach(button => {
+                if (!button.dataset.sort) return;  // The genre and server buttons share this class.
+                button.onclick = () => {
                     setSortMethod(button.dataset.sort);
 
-                    // Close mobile menu if open
-                    mobileMenu.classList.remove('open');
+                    // Close the Actions tray if it is open
+                    setOverlay('menuOpen', false);
 
-                    // Scroll to top when sort method changes
-                    window.scrollTo({
-                        top: 0,
-                        behavior: 'smooth'
-                    });
-                });
-            }
-        });
-
-        // Handle desktop genre dropdown button clicks
-        document.querySelectorAll('.genre-dropdown .genre-button').forEach(button => {
-            button.addEventListener('click', (e) => {
-                if (checkMobileView()) {
-                    // On mobile, we'll use the drawer instead
-                    return;
-                }
-
-                // Toggle the desktop genre dropdown
-                const dropdown = button.closest('.genre-dropdown');
-                const menu = dropdown.querySelector('.genre-menu');
-
-                // Close other dropdowns first
-                document.querySelectorAll('.genre-menu.show').forEach(m => {
-                    if (m !== menu) {
-                        m.classList.remove('show');
-                    }
-                });
-
-                // Check if dropdown would overflow the window and adjust position
-                setTimeout(() => {
-                    const menuRect = menu.getBoundingClientRect();
-                    const windowWidth = window.innerWidth;
-
-                    // Only needed as a fallback if CSS positioning doesn't work
-                    if (menuRect.right > windowWidth) {
-                        menu.style.left = 'auto';
-                        menu.style.right = '0';
-                    }
-                }, 0);
-
-                menu.classList.toggle('show');
-                e.stopPropagation(); // Prevent the document click handler from immediately closing it
+                    /* Back to the top, so the new ordering is read from its
+                       beginning. Routed through the overlay system rather than
+                       scrolled directly: this same handler serves the header's
+                       copy of the control and the Actions tray's, and from
+                       inside the tray the page is pinned — a direct scrollTo
+                       moves nothing and is then overwritten by the scroll lock
+                       restoring where the user was. */
+                    window.GlimpseOverlays.scrollPageTo(0);
+                };
             });
-        });
-
-        // Mobile genre drawer functionality
-        const genreDrawerOverlay = document.querySelector('.genre-drawer-overlay');
-        const genreDrawer = document.querySelector('.genre-drawer');
-        const mobileGenreButton = document.getElementById('mobile-genre-button');
-        const genreDrawerClose = document.querySelector('.genre-drawer-close');
-
-        // Open genre drawer on mobile
-        mobileGenreButton.addEventListener('click', () => {
-            openGenreDrawer();
-
-            // Close mobile menu if open
-            mobileMenu.classList.remove('open');
-        });
-
-        // Close genre drawer when clicking the close button
-        genreDrawerClose.addEventListener('click', closeGenreDrawer);
-
-        // Close genre drawer when clicking the overlay
-        genreDrawerOverlay.addEventListener('click', (e) => {
-            if (e.target === genreDrawerOverlay) {
-                closeGenreDrawer();
-            }
-        });
-
-        // Function to open the genre drawer
-        function openGenreDrawer() {
-            // Make sure drawer content is up to date
-            const activeTab = document.querySelector('.tab.active').dataset.content;
-            updateGenreDrawer(activeTab);
-
-            genreDrawerOverlay.classList.add('open');
-            genreDrawer.classList.add('open');
-            document.body.style.overflow = 'hidden'; // Prevent background scrolling
         }
 
-        // Function to close the genre drawer
-        function closeGenreDrawer() {
-            genreDrawerOverlay.classList.remove('open');
-            genreDrawer.classList.remove('open');
-            document.body.style.overflow = ''; // Restore scrolling
+        bindSortButtons();
+
+        /* Bind again once Alpine has finished initialising.
+         *
+         * THE PARSE-TIME PASS ABOVE CANNOT SEE THE ACTIONS TRAY. That tray is
+         * authored inside `<template x-teleport="body">`, so until Alpine boots
+         * it is inert template content that querySelectorAll does not reach —
+         * and Alpine is a `defer` script, so it boots after this one has run to
+         * completion. Every control in that tray was left with no handler at
+         * all: the sort buttons carried only the Alpine `@click` that closes the
+         * tray, and the server button carried nothing.
+         *
+         * The failure is invisible from every angle. Nothing throws. The tray
+         * opens, the control highlights, the tray dismisses on tap — and the
+         * grid does not change. It reports as "the mobile sort buttons do
+         * nothing", which reads like a sorting bug rather than a wiring one.
+         *
+         * Note that only the BINDING passes were broken. Queries made at click
+         * time reach the teleported markup fine, which is why tapping the
+         * header's sort control correctly marks the tray's copy active too —
+         * setSortMethod() queries when it runs. That divergence is what makes
+         * this worth a comment: the tray looks wired because its state tracks.
+         *
+         * Both passes are idempotent, so the earlier calls stay where they are.
+         * That is deliberate rather than lazy: if Alpine ever fails to load, the
+         * header's controls still work, and the app degrades to a page without
+         * overlays instead of a page without sorting. */
+        function bindRelocatedControls() {
+            bindSortButtons();
+            renderServerSwitcher();
         }
 
-        // Close desktop genre dropdown when clicking outside
-        document.addEventListener('click', (e) => {
-            if (!e.target.closest('.genre-dropdown')) {
-                document.querySelectorAll('.genre-menu').forEach(menu => {
-                    menu.classList.remove('show');
-                });
-            }
-        });
+        document.addEventListener('alpine:initialized', bindRelocatedControls);
+
+        /* The desktop dropdown's positioning logic, the mobile drawer's open and
+           close functions, the click-outside handler and the manual body-overflow
+           toggle all lived here. All of it is gone.
+
+           The genre filter is one tray now, opened declaratively by its trigger.
+           Backdrop dismissal, Escape, the swipe gesture and the scroll lock come
+           from the overlay system, so none of them is this file's problem — and
+           the overflow-clamping fallback is not needed by an overlay that is
+           centred or docked rather than anchored to a button. */
+
+        /* No "refresh on open" hook. updateGenreUI() already runs on load and on
+           every tab switch, which are the only two things that change the list,
+           so the tray's contents are current before it can be opened. */
 
         // Function to extract and count all unique genres from media data
         function extractGenres(mediaData, type) {
@@ -1976,55 +2457,64 @@
                     return result;
                 }, {});
         }
+        /**
+         * Build the genre tray's list for a content type.
+         *
+         * This replaces updateGenreDropdown() and updateGenreDrawer(), which
+         * were the same function written twice — one for the desktop dropdown,
+         * one for the phone drawer — and had already drifted: the drawer showed
+         * counts the dropdown did not, and the two disagreed about how the
+         * trigger should be labelled. One control, one builder.
+         */
+        function updateGenreList(type) {
+            const genres = allGenres[type] || {};
+            const body = document.querySelector('.genre-tray__body');
+            if (!body) return;
 
-        // Function to update desktop genre dropdown with available genres
-        function updateGenreDropdown(type) {
-            const genres = allGenres[type];
-            const dropdowns = document.querySelectorAll('.genre-menu');
+            body.innerHTML = '';
 
-            // Update genre menus (desktop only)
-            dropdowns.forEach(dropdown => {
-                // Keep the "All Genres" item
-                dropdown.innerHTML = `<div class="genre-item ${currentGenre === 'all' ? 'active' : ''}" data-genre="all">All Genres</div>`;
+            const total = Object.values(genres).reduce((sum, n) => sum + n, 0);
+            body.appendChild(genreItem('all', 'All Genres', total));
 
-                // Add each genre with count
-                Object.entries(genres).forEach(([genre, count]) => {
-                    const genreItem = document.createElement('div');
-                    genreItem.className = `genre-item ${currentGenre === genre ? 'active' : ''}`;
-                    genreItem.dataset.genre = genre;
-                    genreItem.innerHTML = `${genre} <span class="genre-badge">${count}</span>`;
-                    dropdown.appendChild(genreItem);
-                });
+            Object.keys(genres)
+                .sort((a, b) => a.localeCompare(b))
+                .forEach(genre => body.appendChild(genreItem(genre, genre, genres[genre])));
+
+            updateGenreTriggers();
+        }
+
+        /** One row in the genre tray. */
+        function genreItem(value, label, count) {
+            const item = document.createElement('button');
+            item.type = 'button';
+            item.className = 'genre-item' + (currentGenre === value ? ' active' : '');
+            item.dataset.genre = value;
+            // aria-pressed rather than a class alone: the active genre is state,
+            // and a class is invisible to a screen reader.
+            item.setAttribute('aria-pressed', String(currentGenre === value));
+            item.innerHTML = `<span class="genre-item__label"></span>` +
+                `<span class="genre-item__count"></span>`;
+            item.querySelector('.genre-item__label').textContent = label;
+            item.querySelector('.genre-item__count').textContent = count ? String(count) : '';
+
+            item.addEventListener('click', () => {
+                setGenreFilter(value);
+                /* Through the overlay system: this control only ever exists
+                   inside the genre tray, so the page is always pinned when it
+                   runs. A direct scrollTo here moved nothing and was then
+                   overwritten by the scroll lock restoring the old position. */
+                window.GlimpseOverlays.scrollPageTo(0);
             });
+            return item;
+        }
 
-            // Add click event listeners to desktop genre items
-            document.querySelectorAll('.genre-menu .genre-item').forEach(item => {
-                item.addEventListener('click', () => {
-                    setGenreFilter(item.dataset.genre);
-
-                    // Close dropdown
-                    document.querySelectorAll('.genre-menu').forEach(menu => {
-                        menu.classList.remove('show');
-                    });
-
-                    // Scroll to top
-                    window.scrollTo({
-                        top: 0,
-                        behavior: 'smooth'
-                    });
-                });
-            });
-
-            // Set button text based on current selection
+        /** Label every genre trigger with the active selection. */
+        function updateGenreTriggers() {
             document.querySelectorAll('.genre-button').forEach(button => {
                 if (currentGenre !== 'all') {
-                    if (button.id === 'mobile-genre-button') {
-                        // For mobile button, show genre name directly
-                        button.innerHTML = `<span class="sort-icon">🏷️ ${currentGenre}</span>`;
-                    } else {
-                        // Desktop buttons get the nested span structure
-                        button.innerHTML = `<span class="sort-icon">🏷️ <span class="selected-genre">${currentGenre}</span></span>`;
-                    }
+                    button.innerHTML =
+                        `<span class="sort-icon">🏷️ <span class="selected-genre"></span></span>`;
+                    button.querySelector('.selected-genre').textContent = currentGenre;
                     button.classList.add('active');
                 } else {
                     button.innerHTML = `<span class="sort-icon">🏷️ Genre</span>`;
@@ -2033,46 +2523,9 @@
             });
         }
 
-        // Function to update mobile genre drawer with available genres
-        function updateGenreDrawer(type) {
-            const genres = allGenres[type];
-            const drawerContent = document.querySelector('.genre-drawer-content');
-
-            // Clear current content
-            drawerContent.innerHTML = '';
-
-            // Add "All Genres" item
-            const allGenresItem = document.createElement('div');
-            allGenresItem.className = `genre-item ${currentGenre === 'all' ? 'active' : ''}`;
-            allGenresItem.dataset.genre = 'all';
-            allGenresItem.innerHTML = 'All Genres';
-            drawerContent.appendChild(allGenresItem);
-
-            // Add each genre with count
-            Object.entries(genres).forEach(([genre, count]) => {
-                const genreItem = document.createElement('div');
-                genreItem.className = `genre-item ${currentGenre === genre ? 'active' : ''}`;
-                genreItem.dataset.genre = genre;
-                genreItem.innerHTML = `${genre} <span class="genre-badge">${count}</span>`;
-                drawerContent.appendChild(genreItem);
-            });
-
-            // Update drawer title
-            const drawerTitle = document.querySelector('.genre-drawer-title');
-            drawerTitle.textContent = `${type === 'movies' ? 'Movie' : 'TV Show'} Genres`;
-
-            // Add click event listeners to drawer genre items
-            document.querySelectorAll('.genre-drawer-content .genre-item').forEach(item => {
-                item.addEventListener('click', () => {
-                    setGenreFilter(item.dataset.genre);
-                });
-            });
-        }
-
-        // Combined function to update both genre UI components
+        // Kept as the name the rest of the file calls.
         function updateGenreUI(type) {
-            updateGenreDropdown(type);
-            updateGenreDrawer(type);
+            updateGenreList(type);
         }
 
         // Enhanced search functionality
@@ -2102,11 +2555,11 @@
         async function loadMedia() {
             try {
                 // Load movies
-                const moviesResponse = await fetch('data/movies.json');
+                const moviesResponse = await fetch(dataUrl('movies.json'));
                 moviesData = await moviesResponse.json();
 
                 // Load TV shows
-                const tvShowsResponse = await fetch('data/tvshows.json');
+                const tvShowsResponse = await fetch(dataUrl('tvshows.json'));
                 tvShowsData = await tvShowsResponse.json();
 
                 // Extract genres
@@ -2221,6 +2674,288 @@
             displayMedia(sortedData, activeTab);
         }
 
+        /* ------------------------------------------------------------------
+           The windowed grid
+
+           The grid renders a slice near the viewport, not the whole library.
+           A library is data; a grid is a rendering of part of it. Rendering
+           every item tied the browser's per-frame style, layout and paint cost
+           to how much media the user owns, so the app got slower for exactly
+           the people who use it most.
+
+           Measured at 7,000 movies, 390x844, before this existed:
+
+             | cards | DOM nodes | idle   | scroll-lock relayout |
+             | 7000  | 63,248    | 3.0fps | 666ms                |
+             | 2000  | 18,248    | 10.9   | 178ms                |
+             |  800  |  7,448    | 29.9   |  71ms                |
+             |  300  |  2,948    | 59.9   |  28ms                |
+             |    0  |    236    | 59.9   |   0.7ms              |
+
+           Six cards are on screen at 390px and ten at 1280px, in a document
+           1,227,442px tall. The overlay trays were reported as "choppy"
+           because of this and there is nothing wrong with the trays: at 3fps a
+           280ms tray animation gets one frame, so it jumps.
+
+           Re-measure with `tools/grid_metrics.py`, and only ever against a
+           library seeded to thousands — a few-hundred-item fixture cannot fail
+           these numbers, which is how this survived a browser check once
+           already.
+           ------------------------------------------------------------------ */
+
+        /* Items rendered at once. An order of magnitude below the measured
+           ceiling (60fps still held at 300) and well above what any viewport
+           shows, with room for a wide desktop grid's five columns. */
+        const GRID_WINDOW_ITEMS = 120;
+
+        /* Rows rendered beyond the viewport, so a fast flick does not outrun
+           the render and show blank rows. */
+        const GRID_OVERSCAN_ROWS = 4;
+
+        /* Entrance stagger, by ROW rather than by item, and capped.
+
+           This was `index * 0.03s` computed from the item's position in the
+           WHOLE library, which is a delay multiplied by a number the app does
+           not control: the 7,000th card waited 209.97 seconds. Measured, 6,611
+           of 7,000 cards were still `opacity: 0` twenty-five seconds after
+           load — the grid was not slow to animate, most of it was invisible,
+           and scrolling into it showed empty space where cards were.
+
+           An entrance animation softens an arrival the viewer is watching. A
+           delay longer than their attention is not a softer arrival, it is a
+           missing item. */
+        const GRID_STAGGER_PER_ROW = 0.04;
+        const GRID_STAGGER_CAP = 0.3;
+
+        // One view per tab. The inactive tab keeps whatever it last rendered,
+        // which is bounded now rather than a second full library.
+        const gridViews = new Map();
+
+        function gridView(type) {
+            if (gridViews.has(type)) return gridViews.get(type);
+
+            const grid = document.querySelector(`#${type}-content .media-grid`);
+            const view = {
+                type,
+                grid,
+                data: [],
+                first: 0,
+                rendered: 0,
+                perRow: 1,
+                rowPitch: 1,
+                rowGap: 0,
+                topSpacer: makeSpacer(),
+                bottomSpacer: makeSpacer(),
+            };
+
+            /* One delegated listener for the whole grid, not one per card.
+               There were 7,000 closures here; more to the point, a recycled
+               card must not be able to carry a stale handler for the item that
+               used to occupy it. */
+            grid.addEventListener('click', event => {
+                const card = event.target.closest('.media-item');
+                if (!card || !grid.contains(card)) return;
+                const item = view.data[Number(card.dataset.index)];
+                if (item) openModal(item, view.type);
+            });
+
+            gridViews.set(type, view);
+            return view;
+        }
+
+        /* A spacer stands in for the rows that are not rendered, so the
+           document keeps the height the full selection would occupy and the
+           viewer's scroll position means the same thing before and after the
+           window moves.
+
+           `grid-column: 1 / -1` is load-bearing. Without it `auto-fill` places
+           the spacer as an ordinary cell: it consumes a grid position, every
+           following card shifts one column left, and the row arithmetic goes
+           wrong in a way that reads as an off-by-one in the window rather than
+           as a layout bug. */
+        function makeSpacer() {
+            const spacer = document.createElement('div');
+            spacer.className = 'grid-spacer';
+            spacer.setAttribute('aria-hidden', 'true');
+            spacer.style.gridColumn = '1 / -1';
+            return spacer;
+        }
+
+        /* Geometry read from the rendered grid, never assumed.
+
+           `auto-fill` decides the column count from the available width, so a
+           column count derived from a breakpoint is wrong at every width the
+           breakpoint did not anticipate — the same class of mistake as the
+           hardcoded 280px backdrop height this project already paid for. */
+        function measureGrid(view) {
+            const styles = getComputedStyle(view.grid);
+            const columns = styles.gridTemplateColumns.split(' ').filter(Boolean);
+            view.perRow = Math.max(1, columns.length);
+            view.rowGap = parseFloat(styles.rowGap) || 0;
+            /* The grid is padded, so its border box starts 20px above its first
+               row. Measuring rows from the border box puts every row boundary a
+               fifth of a row out — not enough to look broken, enough to pick
+               the wrong row near the threshold. */
+            view.padTop = parseFloat(styles.paddingTop) || 0;
+
+            const card = view.grid.querySelector('.media-item');
+            const cardHeight = card ? card.getBoundingClientRect().height : 0;
+            // Fall back to one row of everything until a card exists to measure.
+            view.rowPitch = cardHeight > 0 ? cardHeight + view.rowGap : 0;
+        }
+
+        // Whole rows only: a partial row would leave a ragged edge mid-grid.
+        function windowRows(view) {
+            return Math.max(1, Math.ceil(GRID_WINDOW_ITEMS / view.perRow));
+        }
+
+        /* Which row the viewer is looking at. The grid's own offset is stable
+           regardless of the spacers, because what sits above the grid does not
+           change when the window moves. */
+        function firstVisibleRow(view) {
+            if (view.rowPitch <= 0) return 0;
+            const contentTop =
+                view.grid.getBoundingClientRect().top + window.scrollY + view.padTop;
+            return Math.floor((window.scrollY - contentTop) / view.rowPitch);
+        }
+
+        function desiredFirstIndex(view) {
+            const startRow = Math.max(0, firstVisibleRow(view) - GRID_OVERSCAN_ROWS);
+            return Math.min(startRow * view.perRow, Math.max(0, view.data.length - 1));
+        }
+
+        function renderWindow(view, first, animate) {
+            const total = view.data.length;
+            const perRow = view.perRow;
+            const rows = windowRows(view);
+            const count = Math.min(rows * perRow, total - first);
+
+            // Unobserve what is leaving. The observer would otherwise
+            // accumulate targets that are no longer in the document — the leak
+            // windowing exists to prevent, reintroduced through the back door.
+            view.grid.querySelectorAll('.poster').forEach(img => imageObserver.unobserve(img));
+
+            const fragment = document.createDocumentFragment();
+            for (let i = first; i < first + count; i++) {
+                fragment.appendChild(buildCard(view, i, animate ? i - first : -1));
+            }
+
+            const totalRows = Math.ceil(total / perRow);
+            const rowsBefore = Math.floor(first / perRow);
+            const rowsAfter = Math.max(0, totalRows - rowsBefore - Math.ceil(count / perRow));
+
+            /* A spacer standing in for zero rows is not zero-height — it is
+               still a grid item, so it still opens a row and still adds a gap.
+               It has to leave the layout entirely. */
+            sizeSpacer(view.topSpacer, rowsBefore, view);
+            sizeSpacer(view.bottomSpacer, rowsAfter, view);
+
+            view.grid.replaceChildren(view.topSpacer, fragment, view.bottomSpacer);
+
+            view.first = first;
+            view.rendered = count;
+
+            view.grid.querySelectorAll('.poster').forEach(img => imageObserver.observe(img));
+        }
+
+        function sizeSpacer(spacer, rows, view) {
+            if (rows <= 0) {
+                spacer.style.display = 'none';
+                spacer.style.height = '0px';
+                return;
+            }
+            spacer.style.display = '';
+            // The spacer's own trailing gap is part of the rows it replaces.
+            spacer.style.height = `${rows * view.rowPitch - view.rowGap}px`;
+        }
+
+        function buildCard(view, index, animationOrder) {
+            const item = view.data[index];
+            const type = view.type;
+
+            const mediaItem = document.createElement('div');
+            mediaItem.className = 'media-item';
+            mediaItem.dataset.id = item.id;
+            mediaItem.dataset.type = type;
+            // The delegated listener resolves the item through this, so a
+            // recycled element cannot open the item it used to hold.
+            mediaItem.dataset.index = String(index);
+
+            if (animationOrder >= 0) {
+                const row = Math.floor(animationOrder / view.perRow);
+                const delay = Math.min(row * GRID_STAGGER_PER_ROW, GRID_STAGGER_CAP);
+                mediaItem.style.opacity = '0';
+                mediaItem.style.transition = `opacity 0.3s ease ${delay}s, transform 0.3s ease ${delay}s`;
+                /* Flipped on the next frame rather than by a timer per card.
+                   There were 7,000 of those. One frame is all the browser needs
+                   to have taken the starting value. */
+                requestAnimationFrame(() => {
+                    mediaItem.style.opacity = '1';
+                });
+            }
+
+            const posterPath = type === 'movies' ?
+                dataUrl('posters', 'movies', `${item.id}.jpg`) :
+                dataUrl('posters', 'tvshows', `${item.id}.jpg`);
+
+            const addedDate = formatDate(item.addedAt);
+
+            mediaItem.innerHTML = `
+                <div class="poster-container">
+                    <div class="poster-placeholder">
+                        <div class="loading-spinner"></div>
+                    </div>
+                    <img data-src="${posterPath}"
+                         alt="${item.title}"
+                         class="poster">
+                </div>
+                <div class="media-info">
+                    <div class="media-title">${item.title}</div>
+                    <div class="media-year">${item.year}</div>
+                    <div class="media-added">Added: ${addedDate}</div>
+                </div>
+            `;
+
+            return mediaItem;
+        }
+
+        /* Re-render only when the window has actually moved. Scrolling inside
+           the current window must cost nothing, or the fix reintroduces
+           per-frame work by another route. */
+        function updateGridWindow(view) {
+            if (!view || view.data.length === 0 || view.rowPitch <= 0) return;
+            const first = desiredFirstIndex(view);
+            if (first === view.first) return;
+            renderWindow(view, first, false);
+        }
+
+        function activeGridView() {
+            const activeTab = document.querySelector('.tab.active');
+            return activeTab ? gridViews.get(activeTab.dataset.content) : null;
+        }
+
+        (function watchScrollForWindow() {
+            let queued = false;
+            function schedule() {
+                if (queued) return;
+                queued = true;
+                requestAnimationFrame(() => {
+                    queued = false;
+                    updateGridWindow(activeGridView());
+                });
+            }
+            window.addEventListener('scroll', schedule, { passive: true });
+            window.addEventListener('resize', () => {
+                const view = activeGridView();
+                if (!view || view.data.length === 0) return;
+                // `perRow` changes with width, so every row index computed for
+                // the old column count is wrong. Re-measure, then re-render
+                // from where the viewer is rather than from the top.
+                measureGrid(view);
+                renderWindow(view, desiredFirstIndex(view), false);
+            });
+        })();
+
         // Display media items with enhanced animations
         function displayMedia(data, type) {
             const contentDiv = document.querySelector(`#${type}-content`);
@@ -2270,11 +3005,6 @@
                 noResultsDiv.classList.add('active');
                 grid.style.display = 'none';
 
-                // Make sure genre dropdown or drawer gets closed when showing no results
-                document.querySelectorAll('.genre-menu').forEach(menu => {
-                    menu.classList.remove('show');
-                });
-
                 return;
             }
 
@@ -2282,69 +3012,40 @@
             noResultsDiv.classList.remove('active');
             grid.style.display = 'grid';
 
-            // Create and append items with staggered animation
-            data.forEach((item, index) => {
-                const mediaItem = document.createElement('div');
-                mediaItem.className = 'media-item';
-                mediaItem.dataset.id = item.id;
-                mediaItem.dataset.type = type;
-                mediaItem.style.opacity = '0';
-                mediaItem.style.transition = `opacity 0.3s ease ${index * 0.03}s, transform 0.3s ease ${index * 0.03}s`;
+            /* Render a window, not the library.
 
-                const posterPath = type === 'movies' ?
-                    `data/posters/movies/${item.id}.jpg` :
-                    `data/posters/tvshows/${item.id}.jpg`;
+               The selection has changed, so this always starts at the top —
+               a new search or sort showing its results from wherever the
+               viewer happened to be scrolled would be wrong. The window then
+               follows the scroll from there.
 
-                // Format the added date
-                const addedDate = formatDate(item.addedAt);
+               Geometry has to be measured from a rendered card, so the first
+               pass renders and the second pass sizes the spacers against real
+               numbers. Both are cheap: it is one window either way. */
+            const view = gridView(type);
+            view.data = data;
+            view.first = -1;
 
-                // Get primary genre if available
-                const primaryGenre = item.genres && item.genres.length > 0 ? item.genres[0] : 'Unknown';
+            measureGrid(view);
+            renderWindow(view, 0, true);
 
-                mediaItem.innerHTML = `
-                    <div class="poster-container">
-                        <div class="poster-placeholder">
-                            <div class="loading-spinner"></div>
-                        </div>
-                        <img data-src="${posterPath}" 
-                             alt="${item.title}" 
-                             class="poster">
-                    </div>
-                    <div class="media-info">
-                        <div class="media-title">${item.title}</div>
-                        <div class="media-year">${item.year}</div>
-                        <div class="media-added">Added: ${addedDate}</div>
-                    </div>
-                `;
-
-                grid.appendChild(mediaItem);
-
-                // Trigger animation after a small delay
-                setTimeout(() => {
-                    mediaItem.style.opacity = '1';
-                }, 10);
-
-                // Observe the image for lazy loading
-                const img = mediaItem.querySelector('.poster');
-                imageObserver.observe(img);
-
-                // Add click event to open modal
-                mediaItem.addEventListener('click', () => {
-                    openModal(item, type);
-                });
-            });
+            if (view.rowPitch <= 0) {
+                // No card had been laid out yet, so the pitch was unknown and
+                // the spacers were sized against nothing. Now one exists.
+                measureGrid(view);
+                renderWindow(view, 0, true);
+            }
         }
 
-        // Modal functionality
-        const modalOverlay = document.querySelector('.modal-overlay');
-        const modalClose = document.querySelector('.modal-close');
+        // Detail overlay. Open state lives in the Alpine scope; the close
+        // button, backdrop and Escape are wired in the markup.
 
         // Function to open modal with media details
         function openModal(item, type) {
             // Set poster image
             const posterPath = type === 'movies' ?
-                `data/posters/movies/${item.id}.jpg` :
-                `data/posters/tvshows/${item.id}.jpg`;
+                dataUrl('posters', 'movies', `${item.id}.jpg`) :
+                dataUrl('posters', 'tvshows', `${item.id}.jpg`);
 
             const posterContainer = document.querySelector('.modal-poster');
             posterContainer.innerHTML = ''; // Clear existing content
@@ -2371,10 +3072,10 @@
 
             // Set backdrop image
             const backdropPath = type === 'movies' ?
-                `data/backdrops/movies/${item.id}.jpg` :
-                `data/backdrops/tvshows/${item.id}.jpg`;
+                dataUrl('backdrops', 'movies', `${item.id}.jpg`) :
+                dataUrl('backdrops', 'tvshows', `${item.id}.jpg`);
 
-            const backdropElement = document.querySelector('.modal-backdrop');
+            const backdropElement = document.querySelector('.modal-backdrop-art');
             backdropElement.innerHTML = ''; // Clear any existing content
             backdropElement.style.backgroundImage = `url(${backdropPath})`;
 
@@ -2553,63 +3254,52 @@
                     <div class="modal-section-title">Date Added</div>
                     <div id="modal-added-date">${dateAdded}</div>
                 `;
-                document.querySelector('.modal-body').appendChild(dateSection);
+                document.querySelector('.modal .modal__body').appendChild(dateSection);
             } else {
                 // Update existing date info
                 dateAddedElem.textContent = dateAdded;
             }
 
-            // Make sure any previous modal content is reset before showing new modal
-            const modalBody = document.querySelector('.modal-body');
-            modalBody.scrollTop = 0;
+            // A reused overlay keeps the previous item's scroll position, so
+            // the next item opens part-way down its own summary.
+            //
+            // The three nested timeouts and the forced reflow that used to be
+            // here were fighting the old presentation: the panel animated from a
+            // transform, and reading scrollTop mid-animation on a phone gave the
+            // pre-animation value. The panel no longer scrolls — its body does,
+            // and the body is not what moves — so one reset before it is shown
+            // is enough.
+            const modalBody = document.querySelector('.modal .modal__body');
+            if (modalBody) modalBody.scrollTop = 0;
 
-            // Show modal with animation
-            document.body.style.overflow = 'hidden'; // Prevent background scrolling
-            modalOverlay.classList.add('active');
-
-            // Double attempt to reset scroll after modal is visible
-            // This addresses timing issues on mobile devices
-            setTimeout(() => {
-                // First reset
-                modalBody.scrollTop = 0;
-
-                // Second delayed reset with forced reflow (critical for mobile browsers)
-                setTimeout(() => {
-                    modalBody.scrollTop = 0;
-                    // Force layout recalculation on mobile
-                    void modalBody.offsetHeight;
-                }, 50);
-            }, 10);
+            setOverlay('detailOpen', true);
         }
 
-        // Close modal functionality
-        modalClose.addEventListener('click', function (e) {
-            e.preventDefault(); // Prevent event propagation
-            e.stopPropagation(); // Stop event bubbling
-            closeModal();
-        });
-
-        // Close modal when clicking outside
-        modalOverlay.addEventListener('click', (e) => {
-            if (e.target === modalOverlay) {
-                closeModal();
-            }
-        });
-
-        // Close modal with escape key
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && modalOverlay.classList.contains('active')) {
-                closeModal();
-            }
-        });
-
-        // Function to close the modal
+        /* The close button, backdrop click and Escape are all declared in the
+           markup, and the scroll lock is the overlay system's. What was thirty
+           lines of listeners is now this one function, kept because the rest of
+           the file calls it by name. */
         function closeModal() {
-            modalOverlay.classList.remove('active');
-            document.body.style.overflow = ''; // Restore scrolling
+            setOverlay('detailOpen', false);
         }
 
-        // Initialize on page load
+        // Initialize on page load.
+        //
+        // applyConfig() runs FIRST: it sets currentSortMethod from config.json,
+        // and loadMedia() sorts as soon as the data arrives. Reversing these two
+        // lines makes SORT_BY_DATE_ADDED apply only after the next interaction —
+        // a bug that looks like the setting being ignored.
+        if (!CONFIG) {
+            reportConfigError('config.json could not be read or was not valid JSON.');
+            // Abort the rest of this block. There is no top-level `return` in a
+            // classic script, and continuing would run initialisation against a
+            // body that has just been replaced by the error message. Later
+            // script blocks guard on window.GLIMPSE.failed.
+            window.GLIMPSE.failed = true;
+            throw new Error('Glimpse: configuration unavailable; startup aborted.');
+        }
+
+        applyConfig();
         loadMedia();
 
         // Enhanced scroll to top button functionality
@@ -2714,8 +3404,10 @@
 
                 // Check if swipe is horizontal enough (angle less than threshold)
                 if (angle < swipeAngleThreshold) {
-                    // Don't process swipes when modal is open
-                    if (modalOverlay.classList.contains('active')) {
+                    // A swipe inside an overlay belongs to that overlay — the
+                    // tray's own dismiss gesture, or a scroll in its body — not
+                    // to the tab switcher behind it.
+                    if (isOverlayOpen('detailOpen')) {
                         return;
                     }
 
@@ -2758,64 +3450,26 @@
             }
         }
 
-        // Server toggle functionality with cache clearing
-        async function toggleServer() {
-            const currentPath = window.location.pathname;
-            let newPath;
-
-            if (currentPath === "/" || currentPath === "/index.html") {
-                newPath = "SERVER_PATH/";
-            } else if (currentPath.startsWith("/plex/")) {
-                newPath = "/jellyfin/";
-            } else if (currentPath.startsWith("/jellyfin/")) {
-                newPath = "/plex/";
-            } else {
-                newPath = "SERVER_PATH/";
+        /**
+         * Kept only because the markup has inline onclick="toggleServer()"
+         * handlers. renderServerSwitcher() rebinds those buttons, so this runs
+         * only for a path that missed rebinding; it delegates rather than
+         * reimplementing the choice.
+         *
+         * Previously this hardcoded a Plex-to-Jellyfin swap and fell through to
+         * a "SERVER_PATH/" placeholder for anything else — which meant a
+         * Plex+Emby install navigated to a literal /SERVER_PATH/ and 404'd.
+         */
+        function toggleServer() {
+            const others = otherServers();
+            if (others.length > 0) {
+                switchToServer(others[0].id);
             }
-
-            // Clear themed cache in service worker before navigating
-            if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
-                try {
-                    // Create a message channel to communicate with the service worker
-                    const messageChannel = new MessageChannel();
-
-                    // Send message to clear themed cache
-                    navigator.serviceWorker.controller.postMessage(
-                        { type: 'CLEAR_THEMED_CACHE' },
-                        [messageChannel.port2]
-                    );
-
-                    // Wait for confirmation (optional, but good practice)
-                    messageChannel.port1.onmessage = (event) => {
-                        console.log('Service Worker cache cleared:', event.data);
-                    };
-                } catch (error) {
-                    console.log('Could not clear service worker cache:', error);
-                }
-            }
-
-            // Navigate to the new path
-            window.location.href = newPath;
         }
-
-        // Check if server toggle should be shown (only if properly configured)
-        document.addEventListener('DOMContentLoaded', function () {
-            const serverToggles = document.querySelectorAll('.server-toggle');
-            const serverButtons = document.querySelectorAll('.server-toggle-button');
-
-            serverButtons.forEach(button => {
-                const serverText = button.querySelector('.server-text');
-                if (serverText && !serverText.textContent.includes('SERVER_NAME')) {
-                    // Server is properly configured, show the toggle
-                    button.classList.add('configured');
-                    button.closest('.server-toggle').classList.add('configured');
-                }
-            });
-        });
-
     </script>
 
     <script>
+        if (window.GLIMPSE.failed) { throw new Error('Glimpse: configuration unavailable.'); }
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('/sw.js')
@@ -2893,7 +3547,12 @@
 
         // Get the mobile install button
         window.addEventListener('beforeinstallprompt', (e) => {
-            // Get the mobile install button inside the event listener
+            /* Queried HERE, inside the handler, and not hoisted to module scope
+               alongside `installButton`. The mobile copy lives in the Actions
+               tray, which Alpine teleports into <body> when it initialises — so
+               a module-scope query runs before the element exists and stores
+               null forever. hideInstallButtons() and showInstallButtons() query
+               at call time for the same reason. */
             const mobileInstallButton = document.querySelector('.mobile-install-button');
 
             // Don't show install prompt if already running as PWA
@@ -2956,9 +3615,7 @@
 
                 newMobileButton.addEventListener('click', (e) => {
                     handleInstall(e);
-                    // Also close the mobile menu
-                    const mobileMenu = document.querySelector('.mobile-menu');
-                    mobileMenu.classList.remove('open');
+                    setOverlay('menuOpen', false);
                 });
             }
         });
@@ -3000,14 +3657,17 @@
                 gap: 10px;
             }
             
-            /* Mobile install button styling */
+            /* The install button inside the Actions overlay. Width, centring and
+               padding come from the .sheet__body rules in the authored
+               stylesheet; what is left here is the colour and the cancellation
+               of .install-button's own margin-left.
+
+               No margin-top: the overlay's list is a flex column with its own
+               gap, and an extra margin here spaced this one control 20px from
+               its neighbour where every other pair sat at 10px. */
             .mobile-install-button {
-                width: 100%;
-                justify-content: center;
-                margin-top: 10px;
-                padding: 10px;
                 color: #fff !important;
-                margin-left: 0px;
+                margin-left: 0;
             }
             
             .install-icon {
@@ -3023,19 +3683,33 @@
         document.head.appendChild(style);
     </script>
 
-    <!-- Add this at the end of the body, just before the closing </body> tag -->
+    <!-- ============ Trailer ============
+         A dialog at EVERY width, deliberately not a tray. A trailer is sized to
+         its video's aspect ratio rather than to the screen, and a tray's job is
+         to fill a screen's width — docking a 16:9 frame to the bottom edge
+         would letterbox it against a panel it does not fill.
 
-    <!-- Trailer Modal -->
-    <div class="trailer-modal-overlay">
-        <div class="trailer-modal-content">
-            <button class="trailer-modal-close" aria-label="Close trailer">×</button>
+         `closeTrailer()` clears the iframe: dismissing the overlay without
+         removing it leaves the audio playing behind a closed dialog. -->
+    <div class="modal" x-show="trailerOpen" x-cloak style="display:none"
+        x-transition:enter="overlay-opening" x-transition:enter-start="overlay-shut"
+        x-transition:enter-end="overlay-shown" x-transition:leave="overlay-closing"
+        x-transition:leave-start="overlay-shown" x-transition:leave-end="overlay-shut"
+        @keydown.escape.window="if (trailerOpen) closeTrailer()">
+        <div class="modal__backdrop" @click="closeTrailer()"></div>
+        <div class="modal__panel modal__panel--video" role="dialog" aria-modal="true"
+            aria-label="Trailer" tabindex="-1">
+            <div class="modal__head">
+                <h2>Trailer</h2>
+                <button class="overlay__close" @click="closeTrailer()"
+                    aria-label="Close trailer">×</button>
+            </div>
             <div class="trailer-container">
-                <!-- Loading indicator will be inserted here -->
                 <div class="trailer-loading">
                     <div class="trailer-spinner"></div>
                     <div class="trailer-loading-text">Loading trailer...</div>
                 </div>
-                <!-- Iframe will be inserted here dynamically -->
+                <!-- Iframe inserted by openTrailer() -->
             </div>
         </div>
     </div>
@@ -3076,35 +3750,6 @@
             width: 20px;
             height: 20px;
             fill: currentColor;
-        }
-
-
-        /* Trailer Modal */
-        .trailer-modal-overlay {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.9);
-            z-index: 2000;
-            align-items: center;
-            justify-content: center;
-            opacity: 0;
-            transition: opacity var(--transition-speed) ease;
-        }
-
-        .trailer-modal-overlay.active {
-            display: flex;
-            opacity: 1;
-        }
-
-        .trailer-modal-content {
-            position: relative;
-            width: 90%;
-            max-width: 1000px;
-            background-color: transparent;
         }
 
         .trailer-container {
@@ -3174,58 +3819,10 @@
             visibility: hidden;
         }
 
-        .trailer-modal-close {
-            position: absolute;
-            top: -40px;
-            right: 0px;
-            width: 36px;
-            height: 36px;
-            border-radius: 50%;
-            background-color: rgba(0, 0, 0, 0.7);
-            border: 2px solid rgba(255, 255, 255, 0.3);
-            color: var(--light-text);
-            font-size: 20px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: background-color var(--transition-speed);
-            z-index: 20;
-            /* Higher than iframe */
-        }
-
-        .trailer-modal-close:hover {
-            background-color: rgba(255, 255, 255, 0.2);
-        }
-
-        /* Improved mobile styling */
-        @media screen and (max-width: 768px) {
-            .trailer-modal-content {
-                width: 95%;
-            }
-
-            .trailer-modal-close {
-                /* Position in the top-right corner of the video container */
-                right: 0px;
-                /* Make the button larger and more visible */
-                top: -45px;
-                width: 40px;
-                height: 40px;
-                font-size: 24px;
-                /* Add more contrast */
-                background-color: rgba(0, 0, 0, 0.7);
-                z-index: 25;
-                /* Ensure it's above the video */
-            }
-
-            .trailer-spinner {
-                width: 40px;
-                height: 40px;
-            }
-        }
     </style>
 
     <script>
+        if (window.GLIMPSE.failed) { throw new Error('Glimpse: configuration unavailable.'); }
         // Modify the modal HTML to include the Watch Trailer button
         document.addEventListener('DOMContentLoaded', function () {
             // Add the Watch Trailer button to the modal title section
@@ -3248,18 +3845,17 @@
 `;
             modalTitleSection.appendChild(modalActions);
 
-            // Get trailer modal elements
-            const trailerModalOverlay = document.querySelector('.trailer-modal-overlay');
+            // The overlay's own close button, backdrop and Escape handling are
+            // declared in the markup and call closeTrailer(); only the pieces
+            // this code writes into are needed here.
             const trailerContainer = document.querySelector('.trailer-container');
-            const trailerModalClose = document.querySelector('.trailer-modal-close');
-            const trailerModalContent = document.querySelector('.trailer-modal-content');
             const trailerLoading = document.querySelector('.trailer-loading');
 
             // Check if we're on a mobile device
             const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || window.innerWidth < 768;
 
             // Function to open trailer modal with the correct title and year
-            function openTrailerModal(title, year) {
+            function openTrailer(title, year) {
                 // Show the loading indicator
                 trailerLoading.classList.remove('hidden');
 
@@ -3269,9 +3865,7 @@
                     existingIframe.remove();
                 }
 
-                // Show trailer modal
-                document.body.style.overflow = 'hidden'; // Prevent background scrolling
-                trailerModalOverlay.classList.add('active');
+                setOverlay('trailerOpen', true);
 
                 // Create iframe with the movie title AND year
                 const encodedTitle = encodeURIComponent(title);
@@ -3317,54 +3911,37 @@
                 }, 3000); // Reduced timeout to 3 seconds
             }
 
-            // Function to close trailer modal
-            function closeTrailerModal() {
-                trailerModalOverlay.classList.remove('active');
+            /**
+             * Close the trailer and stop it playing.
+             *
+             * Removing the iframe is the part that matters: hiding the overlay
+             * alone leaves a YouTube embed playing, so the user dismisses the
+             * trailer and the audio carries on from nowhere. It is removed after
+             * the leave transition so the video does not vanish mid-fade.
+             *
+             * No scroll-lock bookkeeping here any more. This used to restore
+             * body overflow only if the detail overlay was not also open —
+             * a condition that had to be right in two places. The overlay system
+             * counts open overlays itself, so the page stays locked while the
+             * detail overlay remains up.
+             */
+            function closeTrailer() {
+                setOverlay('trailerOpen', false);
 
-                // Only restore scrolling if the main modal is not open
-                if (!modalOverlay.classList.contains('active')) {
-                    document.body.style.overflow = '';
-                }
-
-                // Remove iframe after animation completes to stop playback
                 setTimeout(() => {
-                    if (!trailerModalOverlay.classList.contains('active')) {
-                        // Reset the loading indicator for next time
-                        trailerLoading.classList.remove('hidden');
-                        trailerLoading.innerHTML = `
-                <div class="trailer-spinner"></div>
-                <div class="trailer-loading-text">Loading trailer...</div>
-            `;
+                    if (isOverlayOpen('trailerOpen')) return;
 
-                        // Remove the iframe to stop playback
-                        const existingIframe = trailerContainer.querySelector('iframe');
-                        if (existingIframe) {
-                            existingIframe.remove();
-                        }
-                    }
+                    trailerLoading.classList.remove('hidden');
+                    trailerLoading.innerHTML =
+                        '<div class="trailer-spinner"></div>' +
+                        '<div class="trailer-loading-text">Loading trailer...</div>';
+
+                    const existingIframe = trailerContainer.querySelector('iframe');
+                    if (existingIframe) existingIframe.remove();
                 }, 300);
             }
-
-            // Close trailer modal when clicking the close button
-            trailerModalClose.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                closeTrailerModal();
-            });
-
-            // Close trailer modal when clicking outside
-            trailerModalOverlay.addEventListener('click', (e) => {
-                if (e.target === trailerModalOverlay) {
-                    closeTrailerModal();
-                }
-            });
-
-            // Close trailer modal with escape key
-            document.addEventListener('keydown', (e) => {
-                if (e.key === 'Escape' && trailerModalOverlay.classList.contains('active')) {
-                    closeTrailerModal();
-                }
-            });
+            // Called from the markup's @click handlers.
+            window.closeTrailer = closeTrailer;
 
             // Store reference to the original openModal function
             const originalOpenModal = window.openModal;
@@ -3381,9 +3958,16 @@
                 if (type === 'movies') {
                     trailerBtn.style.display = 'flex';
 
-                    // Add click event to open trailer with both title and year
+                    // Focus moves to this button BEFORE the trailer opens.
+                    // The trailer is raised from inside the detail overlay, and
+                    // the focus manager records where focus was when it opened;
+                    // if that is the document body — which is what a touch tap
+                    // leaves behind — it declines to restore, and dismissing the
+                    // trailer drops the keyboard user at the top of the page
+                    // instead of back here. Nothing errors.
                     trailerBtn.onclick = () => {
-                        openTrailerModal(item.title, item.year);
+                        trailerBtn.focus();
+                        openTrailer(item.title, item.year);
                     };
                 } else {
                     trailerBtn.style.display = 'none';
@@ -3398,9 +3982,11 @@
                 // Call the original function first
                 originalCloseModal();
 
-                // Also close trailer modal if it's open
-                if (trailerModalOverlay.classList.contains('active')) {
-                    closeTrailerModal();
+                // Dismissing the detail overlay takes the trailer with it —
+                // otherwise the trailer is left floating over the library with
+                // nothing behind it, still playing.
+                if (isOverlayOpen('trailerOpen')) {
+                    closeTrailer();
                 }
             };
         });
@@ -3408,20 +3994,54 @@
 
     <!-- Roulette Button HTML will be injected into the header -->
 
-    <!-- Roulette Modal Overlay -->
-    <div class="roulette-overlay">
-        <div class="roulette-modal">
-            <div class="roulette-spinner-container">
-                <div class="roulette-spinner">
-                    <div class="spinner-item"></div>
-                    <div class="spinner-item"></div>
-                    <div class="spinner-item"></div>
-                </div>
-                <div class="finding-text">Finding something for you...</div>
+    <!-- ============ Roulette ============
+         A dialog at every width: it is a brief status overlay sized to a
+         spinner, not something to fill a screen with.
+
+         No backdrop dismissal while it is choosing — the overlay is gone within
+         a couple of seconds either way, and a stray tap cancelling a pick the
+         user just asked for reads as the control not working. When it has
+         nothing to pick it says so and offers Close, rather than vanishing
+         silently, which is indistinguishable from a broken button. -->
+    <div class="modal modal--tray-on-touch" x-show="rouletteOpen" x-cloak style="display:none"
+        x-transition:enter="overlay-opening" x-transition:enter-start="overlay-shut"
+        x-transition:enter-end="overlay-shown" x-transition:leave="overlay-closing"
+        x-transition:leave-start="overlay-shown" x-transition:leave-end="overlay-shut"
+        @keydown.escape.window="rouletteOpen = false">
+        <div class="modal__backdrop"></div>
+        <div class="modal__panel roulette-modal" role="dialog" aria-modal="true"
+            aria-labelledby="roulette-title" tabindex="-1">
+            <!-- The three regions. They are what `modal--tray-on-touch` needs to
+                 mean anything: the modifier hides the × on touch, so a panel
+                 with no grab handle to replace it — and a backdrop that
+                 deliberately does not dismiss — would be an overlay with no way
+                 out at all. The modifier and these arrived together. -->
+            <div class="sheet__grip"><span class="sheet__handle"></span></div>
+            <div class="modal__head">
+                <h2 id="roulette-title">Roll the Dice</h2>
+                <!-- There was no close control here at any width, outside the
+                     "nothing to pick" state. Tolerable while this was a
+                     two-second status flash; not tolerable the moment a pick
+                     hangs. -->
+                <button class="overlay__close" @click="rouletteOpen = false"
+                    aria-label="Close">×</button>
             </div>
-            <!-- Error buttons only shown when needed -->
-            <div class="roulette-error-buttons" style="display: none;">
-                <button class="roulette-close-btn">Close</button>
+            <!-- aria-live sits on the region whose CONTENT changes, not on the
+                 panel. It used to be on the panel alongside aria-modal, which
+                 announces the whole dialog rather than the status line that
+                 actually updates. -->
+            <div class="modal__body" aria-live="polite">
+                <div class="roulette-spinner-container">
+                    <div class="roulette-spinner">
+                        <div class="spinner-item"></div>
+                        <div class="spinner-item"></div>
+                        <div class="spinner-item"></div>
+                    </div>
+                    <div class="finding-text">Finding something for you...</div>
+                </div>
+                <div class="roulette-error-buttons" style="display: none;">
+                    <button class="roulette-close-btn" @click="rouletteOpen = false">Close</button>
+                </div>
             </div>
         </div>
     </div>
@@ -3481,42 +4101,20 @@
             }
         }
 
-        /* Roulette Overlay Styles */
-        .roulette-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.85);
-            z-index: 1500;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            opacity: 0;
-            visibility: hidden;
-            transition: opacity 0.3s ease, visibility 0.3s ease;
-        }
+        /* Sized to its content; everything else comes from `.modal__panel`.
+           Background, radius, shadow and padding are the overlay system's now —
+           restating them here is how this panel ended up not matching the others
+           and not responding to the tray/dialog switch.
 
-        .roulette-overlay.active {
-            opacity: 1;
-            visibility: visible;
-        }
-
+           The `transform: translateY(30px)` that used to sit here was worse than
+           redundant. `.overlay-shut/.overlay-shown .modal__panel` outrank it
+           during a transition, so it looked harmless — but the moment Alpine
+           removed those classes at the end of the entrance, this rule took over
+           and dropped the settled panel 30px. A leftover from an animation the
+           transition system replaced. */
         .roulette-modal {
-            background-color: var(--secondary-bg);
-            border-radius: 16px;
-            width: 90%;
             max-width: 400px;
-            padding: 30px 20px;
             text-align: center;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
-            transform: translateY(30px);
-            transition: transform 0.3s ease;
-        }
-
-        .roulette-overlay.active .roulette-modal {
-            transform: translateY(0);
         }
 
         /* Spinner Animation */
@@ -3589,38 +4187,24 @@
             background-color: var(--primary-hover);
         }
 
-        /* Responsive Styles */
+        /* Responsive Styles.
+           The width overrides that used to live here are gone: below 768px this
+           panel is a tray, and `.modal--tray-on-touch .modal__panel` already
+           takes the full width and squares off its bottom corners. A `width:
+           95%` fighting that produced a tray docked to the bottom edge with a
+           gap down each side. */
         @media screen and (max-width: 768px) {
-            .roulette-modal {
-                width: 95%;
-                padding: 25px 15px;
-            }
-
             .finding-text {
                 font-size: 1.1rem;
             }
         }
-
-        @media screen and (max-width: 480px) {
-            .roulette-modal {
-                width: 95%;
-                padding: 20px 10px;
-            }
-        }
-
-        /* Hide when modal is open */
-        .modal-overlay.active~.roulette-button,
-        .trailer-modal-overlay.active~.roulette-button,
-        .roulette-overlay.active~.roulette-button {
-            opacity: 0.5;
-            pointer-events: none;
-        }
     </style>
 
     <script>
+        if (window.GLIMPSE.failed) { throw new Error('Glimpse: configuration unavailable.'); }
         document.addEventListener('DOMContentLoaded', function () {
             // Get elements
-            const rouletteOverlay = document.querySelector('.roulette-overlay');
+            // Backdrop, Escape and the Close button are declared in the markup.
             const rouletteModal = document.querySelector('.roulette-modal');
             const errorButtons = document.querySelector('.roulette-error-buttons');
             const findingText = document.querySelector('.finding-text');
@@ -3727,9 +4311,7 @@
                     selectedIndices.clear();
                 }
 
-                // Show the overlay
-                rouletteOverlay.classList.add('active');
-                document.body.style.overflow = 'hidden'; // Prevent background scrolling
+                setOverlay('rouletteOpen', true);
 
                 // Start the roulette animation
                 startRouletteAnimation();
@@ -3839,29 +4421,17 @@
 
             // Function to close the roulette overlay
             function closeRoulette() {
-                rouletteOverlay.classList.remove('active');
-                document.body.style.overflow = ''; // Restore scrolling
-
-                // Hide error buttons if they were shown
+                setOverlay('rouletteOpen', false);
+                // Reset the "nothing to pick" state so the next run opens on the
+                // spinner rather than on the previous failure.
                 errorButtons.style.display = 'none';
             }
+            window.closeRoulette = closeRoulette;
 
             // Button click event listeners
             // Note: the button click event is now added during button creation
 
-            // Close on overlay click
-            rouletteOverlay.addEventListener('click', function (e) {
-                if (e.target === rouletteOverlay) {
-                    closeRoulette();
-                }
-            });
 
-            // Close with Escape key
-            document.addEventListener('keydown', function (e) {
-                if (e.key === 'Escape' && rouletteOverlay.classList.contains('active')) {
-                    closeRoulette();
-                }
-            });
 
             // Add a button to the modal to try again
             function addTryAgainToModal() {
@@ -3973,6 +4543,7 @@
     </script>
 
     <script>
+        if (window.GLIMPSE.failed) { throw new Error('Glimpse: configuration unavailable.'); }
 
         // Code to add to ensure date sort is properly applied when set as default
         function applyDefaultSortStyles() {
