@@ -219,7 +219,11 @@ def test_scroll_from_inside_an_overlay_goes_through_the_overlay_system(index):
     for opener in (
         'function bindSortButtons() {',
         'function genreItem(value, label, count) {',
-        'function switchTab(contentName) {',
+        'function switchTab(contentName, direction) {',
+        # The animated tab path scrolls to the top of the incoming tab too, and
+        # does it while an overlay may still be closing, so it is bound by this
+        # exactly as the instant path is.
+        'function switchTabAnimated(contentName, outgoing, incoming, direction) {',
     ):
         body = block_after(index, opener)
         assert 'window.scrollTo(' not in body, (

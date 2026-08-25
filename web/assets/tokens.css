@@ -73,9 +73,19 @@
 
        --dur-slow is for a tray, which travels the height of its own panel
        rather than the 4% a dialog scales; at --dur-base that distance reads as
-       a snap rather than a slide. */
+       a snap rather than a slide.
+
+       --dur-tab is the same 280ms and deliberately its own name rather than a
+       second use of --dur-slow: a tab crosses the full width of the viewport,
+       which is a different distance from a tray's own height and will not stay
+       tied to it. They agree today because the app should feel like one thing,
+       not because one is defined as the other.
+
+       index.html reads --dur-tab back to time the transition's safety teardown,
+       so it is the single source for that number in both files. */
     --dur-base: 200ms;
     --dur-slow: 280ms;
+    --dur-tab: 280ms;
     --dur-exit: 150ms;
     --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
     --ease-entrance: cubic-bezier(0, 0, 0.2, 1);

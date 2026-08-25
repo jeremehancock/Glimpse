@@ -47,16 +47,25 @@ python3 tools/grid_metrics.py --label before
 ## Using them
 
 ```bash
-# 1. A container with a library in it
-python tools/seed_library.py --out /tmp/seed --posters 60
-docker run -d --name glimpse-dev -p 18081:80 -v /tmp/seed:/app/data \
-  -e PLEX_URL=http://127.0.0.1:32400 -e PLEX_TOKEN=x glimpse:dev
-
+# 1. A container with a library in it.
+#
 # The entrypoint fetches on every start, and a fetch that cannot reach a media
-# server DELETES the snapshots. So copy them in after the container is up.
+# server DELETES the snapshots. The mount is a BIND mount, so that deletion
+# lands on the host — seed to a directory outside it and keep that copy
+# pristine, or the restore below has nothing left to restore from.
+python tools/seed_library.py --out /tmp/seed-src --posters 60
+cp -r /tmp/seed-src /tmp/seed-mount
+
+docker run -d --name glimpse-dev -p 18081:80 -v /tmp/seed-mount:/app/data \
+  -e PLEX_URL=http://127.0.0.1:32400 -e PLEX_TOKEN=x glimpse:dev
+sleep 8   # let the entrypoint finish its doomed fetch first
+
 for s in plex jellyfin; do for k in movies tvshows; do
-  docker cp /tmp/seed/$s/$k.json glimpse-dev:/app/data/$s/$k.json
+  docker cp /tmp/seed-src/$s/$k.json glimpse-dev:/app/data/$s/$k.json
 done; done
+
+# The container writes as root through the mount, so removing these later
+# needs sudo. Use a fresh directory rather than fighting it.
 ```
 
 ```python
