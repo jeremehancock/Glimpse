@@ -41,9 +41,12 @@ built by hand from `fcdcb58`, **amd64 only**.
 > fixes, or the detail overlay. Do not read "code-complete" as "validated", and
 > do not archive on the strength of item 1.
 >
-> **Next up, in this order, set by the user:** punch-list **item 3** (tray
-> handle-to-title gap), then **item 2** (choppy trays). Both have measurements
-> waiting in the punch list at the end of this file — read them first.
+> **Items 3 and 2 are both DONE** (2026-08-25). Item 3 is commit `aac16ba`; item
+> 2 is the change `window-the-media-grid`, which turned out not to be about the
+> trays at all — the grid rendered every one of ~7,000 items, so the page sat at
+> ~3fps before any overlay opened. **Next up is item 5** (the movies/TV swipe),
+> which item 2 was blocking. Read item 2's entry at the end of this file first:
+> it records two traps that cost a debugging pass each.
 >
 > **`make lint` needs Node 18+.** The shell default here is v16.20.1, which fails
 > ESLint 9 with a `structuredClone is not defined` *config* error — not a lint
@@ -120,8 +123,10 @@ a separate phone drawer, is now one implementation.
 
 ## What is left
 
-1. **Punch-list item 3, then item 2** — the order the user set on 2026-08-25.
-   See the punch list at the end of this file; both have measurements already.
+1. **Punch-list item 5** (the movies/TV swipe animation). Items 3 and 2 are done;
+   item 2's fix removed the reason item 5 was parked, since the grid no longer
+   holds tens of thousands of nodes to transform. Re-measure before assuming it
+   is now free.
 2. **Hear out the user's remaining issues** with
    `pin-detail-header-and-fix-actions-tray` — see above. They exist and have not
    been described. This may overlap with item 3.
@@ -289,9 +294,9 @@ measured or closed — read each entry before assuming it is unstarted.
 
 | Order | Item | State |
 | --- | --- | --- |
-| **1st** | 3 — tray handle-to-title gap | measured, not fixed |
-| **2nd** | 2 — choppy trays | two leads, not reproduced |
-| then | 5 — movies/TV swipe animation | not started |
+| — | 3 — tray handle-to-title gap | **DONE**, commit `aac16ba` |
+| — | 2 — choppy trays | **DONE** — see below; the trays were never the cause |
+| **next** | 5 — movies/TV swipe animation | not started; **now unblocked** |
 | — | 1 — desktop genre control | **CLOSED, confirmed by the user** |
 | — | 4 — PWA caching | **DONE**, pending `:dev` sign-off |
 | — | 6 — CI/CD publishes | **answered**; needs the `main` bootstrap |
@@ -311,34 +316,58 @@ a fix ever appears not to have landed, compare the served bytes against the repo
 The anchored-dropdown option was never needed. Open question 3 stands answered:
 one overlay at both widths.
 
-### 2. Mobile trays are choppy and don't look like they rise from the bottom
+### 2. Mobile trays are choppy — **DONE. The trays were never the cause.**
 
-**Not addressed. No code has changed, and it has not been reproduced.**
+Reproduced at 7,000 movies, which is why two earlier sessions could not: a
+few-hundred-item fixture cannot fail this. Fixed by `window-the-media-grid`.
 
-The durations are **not** the difference: Glimpse 200/280/150ms against Marquee
-180/300/120ms (`--dur-base` / `--dur-slow` / `--dur-exit`). The open genuinely
-animates `translateY(285px) → 0`. Two leads:
+**The page ran at ~3fps while IDLE**, with no overlay open and nothing
+animating, so a 280ms tray animation got about one frame and jumped. Frame rate
+was controlled by card count, measured on one page with cards removed
+progressively:
 
-- **The likely one.** `web/index.html` renders *every* item as a DOM node
-  (`mediaData.forEach`, ~line 2551); only the images lazy-load via
-  IntersectionObserver. The user's library is ~7,086 items. The scroll lock sets
-  `position: fixed` on `<body>` on the same frame the tray starts moving, forcing
-  a full relayout of every card at frame 1. Marquee's wall is paginated, so its
-  document is a fraction of the size.
+| cards | DOM nodes | idle | scroll-lock relayout |
+| --- | --- | --- | --- |
+| 7000 | 63,248 | 3.0fps | 666ms |
+| 2000 | 18,248 | 10.9fps | 178ms |
+| 800 | 7,448 | 29.9fps | 71ms |
+| 300 | 2,948 | 59.9fps | 28ms |
+| 0 | 236 | 59.9fps | 0.7ms |
 
-  **A few-hundred-item fixture will never reproduce this.** The
-  `cache-for-speed-not-for-offline` session drove a real browser against a
-  **400-item** library and saw nothing wrong — that is not evidence of health.
-  **Seed thousands** before concluding anything.
+Both recorded leads were wrong about the cause:
 
-- Alpine strips `overlay-opening` at ~275ms while the panel is still ~8px from
-  rest, handing the remainder to `.sheet__panel`'s base 200ms transition — an
-  easing discontinuity at the end of every open. On close the panel reaches 236px
-  down while the root is still at 0.61 opacity, so the panel outruns its own
-  backdrop.
+- **The scroll lock was an amplifier, not the cause.** Its forced relayout is
+  real (666ms at 7,000 cards) but the page was already at 3fps before any
+  overlay opened. Fixing it alone would have taken a 3fps animation to 3fps.
+- **The Alpine easing discontinuity is cosmetic.** At one frame per animation
+  there is no easing to discontinue.
 
-Measure before changing anything, and measure on a real browser — see "Testing
-the frontend" above.
+A CPU profile over two idle seconds was **96.8% `(program)`** — browser style,
+layout and paint, not application JavaScript. `display: none` on the grid
+restored 60fps instantly with all 63,248 nodes still in the document: the cost
+was the grid being laid out, not the nodes existing.
+
+**A separate bug found on the way.** The entrance stagger was `index * 0.03s`
+computed from the item's position in the whole library, so the 7,000th card had
+a `transition-delay` of **209.97 seconds**. Measured, **6,611 of 7,000 cards
+were still `opacity: 0` twenty-five seconds after load** — most of the library
+was invisible, and scrolling into it showed empty space.
+
+**After windowing**, at 390x844: 1,318 DOM nodes, 120 cards rendered, 0
+invisible, 60fps idle, scroll-lock relayout 24ms, and a tray open that gets ~17
+frames instead of ~1. Document height is byte-identical before and after, so no
+scroll position moved.
+
+**Two traps this cost time on, both now in `CLAUDE.md`:**
+
+- `scroll-behavior: smooth` is set on the document, so every `scrollTo`
+  animates for ~1s. Measuring before it lands reads a position the user never
+  occupied — it looks exactly like a windowing bug, and produced a fix
+  (`overflow-anchor: none`) for a cause that did not exist. That property is
+  still there as a guard, with a comment saying plainly it has not been observed
+  to do anything.
+- `make test` cannot check any of this. Use `tools/grid_metrics.py` against a
+  seeded library; `tests/test_grid_windowing.py` only pins the source decisions.
 
 ### 3. Every tray needs the same handle-to-title gap
 

@@ -11,6 +11,7 @@ this directory is in none of them. It is also not imported by anything under
 | --- | --- |
 | `browser.py` | Drive a real Chromium over CDP and measure the rendered page |
 | `seed_library.py` | Generate a fake library snapshot at any size |
+| `grid_metrics.py` | Measure the media grid's cost — nodes, frame rate, invisible cards |
 
 ## Why these are committed rather than written per session
 
@@ -26,10 +27,21 @@ the focus manager all sequence on it. Every overlay sits frozen at
 never opens one. Five bugs reached the user that way while both the suite and
 the browser check reported everything fine.
 
-**`seed_library.py`** defaults to **7000 movies** because the app renders every
-item as a DOM node. Several open questions are suspected relayout costs at that
-scale, and a 400-item fixture showed nothing wrong — which was not evidence of
-health.
+**`seed_library.py`** defaults to **7000 movies** because that is the size at
+which the grid used to fail. A 400-item fixture showed nothing wrong, which was
+not evidence of health: at 7,000 the page rendered 63,248 nodes, sat at ~3fps
+while idle, and left 6,611 cards at `opacity: 0`. **Seed thousands or measure
+nothing.**
+
+**`grid_metrics.py`** is the harness that found that and proves it stays fixed.
+The grid renders a window near the viewport now, and the bound it guarantees
+cannot be checked by `make test` — CI has no browser and no library.
+`tests/test_grid_windowing.py` pins the source decisions; this produces the
+numbers. Run it at both widths before and after any change to `displayMedia()`:
+
+```bash
+python3 tools/grid_metrics.py --label before
+```
 
 ## Using them
 

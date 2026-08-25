@@ -32,10 +32,18 @@ app. Say so in the PR rather than deleting it on principle.
 
 ### 3. `tools/` and this file
 
-`tools/browser.py` and `tools/seed_library.py` are development scaffolding.
-Neither is shipped — the `Dockerfile` copies `scripts/`, `web/` and `config/`
-only — so leaving them costs a user nothing, and they are genuinely useful for
-anyone verifying a frontend change later.
+`tools/browser.py`, `tools/seed_library.py` and `tools/grid_metrics.py` are
+development scaffolding. None is shipped — the `Dockerfile` copies `scripts/`,
+`web/` and `config/` only — so leaving them costs a user nothing, and they are
+genuinely useful for anyone verifying a frontend change later.
+
+`grid_metrics.py` has a stronger claim to staying than the other two. The media
+grid is windowed, and the guarantee that makes it worth having — a bounded
+number of rendered elements at any library size — **cannot be checked by
+`make test`**: CI has no browser and no seeded library. `tests/test_grid_windowing.py`
+pins the source decisions, but the numbers themselves only exist when someone
+runs this against thousands of items. Delete it and the next regression is found
+by a user.
 
 **Decide deliberately rather than by default.** Keeping them means keeping
 `tools/README.md` accurate and keeping them working. Deleting them means the

@@ -368,6 +368,43 @@ it.
     are hover-and-fine-pointer only, so a reason attached to one is a reason no
     touch user ever receives. A control with nothing to offer is usually an
     *empty* destination rather than a dead one — prefer opening it and saying so.
+- **The media grid renders a WINDOW near the viewport, never the library.** A
+  library is data; a grid is a rendering of part of it. Rendering every item tied
+  the browser's per-frame cost to how much media a user owns, so the app got
+  slower for exactly the people who use it most. Measured at 7,000 movies:
+  **63,248 DOM nodes, ~3fps while idle, a 666ms forced relayout every time an
+  overlay opened, and 6 cards on screen.** The trays were reported as "choppy"
+  because of this — at 3fps a 280ms tray animation gets one frame — and there was
+  never anything wrong with the trays.
+  - **Nothing may be per-card that can be per-grid.** One delegated click
+    listener, not one per item. `IntersectionObserver` sees only rendered cards
+    and is told to `unobserve` the ones leaving. No `setTimeout` per card. A
+    recycled element must resolve its item through `dataset.index` at click time,
+    or it opens the item it used to hold.
+  - **An entrance delay is computed within the window and capped.** It was
+    `index * 0.03s` over the whole library, so the 7,000th card waited **209.97
+    seconds** and 6,611 of 7,000 sat at `opacity: 0`. The grid was not slow to
+    animate — most of it was invisible, and scrolling showed empty space where
+    cards were. Any per-item delay multiplied by a count the app does not control
+    is this bug.
+  - **Row geometry is read from the rendered grid, never from a breakpoint.**
+    `auto-fill` decides the column count from the width available. Measure from
+    the grid's **content** box: it is padded, and using the border box puts every
+    row boundary a fifth of a row out.
+  - **The spacers that stand in for unrendered rows must span every column**
+    (`grid-column: 1 / -1`). Otherwise `auto-fill` lays one out as an ordinary
+    cell, every following card shifts a column, and it reads as an off-by-one in
+    the window rather than a layout bug.
+  - **`make test` cannot check any of this.** CI has no browser and no library,
+    and a bound asserted against a small fixture passes whatever the code does —
+    it was already true before windowing existed. `tests/test_grid_windowing.py`
+    pins the source decisions; `tools/grid_metrics.py` against a library seeded
+    to thousands produces the numbers. Both halves, or neither is worth having.
+  - **`scroll-behavior: smooth` is set on the document.** Every `scrollTo`
+    animates for about a second, so anything measuring a scroll position must
+    wait for it to land. Measuring mid-flight reads a position the user never
+    occupied, and it looks exactly like a windowing bug — it cost a full
+    debugging pass here, and produced a fix for a cause that did not exist.
 - Python: `pathlib` over `os.path`, type hints on anything crossing a module
   boundary, and `print()` is the fetchers' interface — `docker logs` is how a
   user watches an import run. Don't replace it with a logger that hides output.

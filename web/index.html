@@ -591,12 +591,39 @@
             transform: translateY(0);
         }
 
+        /* `overflow-anchor: none` is a guard, and its status is worth being
+           exact about: it is NOT known to be doing anything here.
+
+           The grid is windowed, so the spacer standing in for the rows above
+           the viewport changes height every time the window moves. Scroll
+           anchoring exists to hold the page still when content above the
+           viewport resizes, and on paper it would fight that: adjust scrollY,
+           which moves the window, which resizes the spacer again.
+
+           Measured with it on and off — eight instant scrolls, drift after each
+           — and the drift was zero either way. Chromium appears not to anchor
+           against a change that follows a scroll it just performed. So this is
+           kept as a guard against a documented interaction that could not be
+           reproduced, not as a fix for an observed one.
+
+           Do not cite it as the cause of anything without re-measuring. The
+           oscillation this originally went in to fix turned out to be
+           `scroll-behavior: smooth` still in flight — a test measuring a
+           position the user never occupied. */
         .media-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(var(--poster-width), 1fr));
             gap: 20px;
             padding: 20px 0;
             margin-bottom: 60px;
+            overflow-anchor: none;
+        }
+
+        /* Stands in for the rows the window is not rendering. It has no content
+           and must never be an anchor candidate either — see above. */
+        .grid-spacer {
+            overflow-anchor: none;
+            pointer-events: none;
         }
 
         /* Enhanced media items */
@@ -2647,6 +2674,288 @@
             displayMedia(sortedData, activeTab);
         }
 
+        /* ------------------------------------------------------------------
+           The windowed grid
+
+           The grid renders a slice near the viewport, not the whole library.
+           A library is data; a grid is a rendering of part of it. Rendering
+           every item tied the browser's per-frame style, layout and paint cost
+           to how much media the user owns, so the app got slower for exactly
+           the people who use it most.
+
+           Measured at 7,000 movies, 390x844, before this existed:
+
+             | cards | DOM nodes | idle   | scroll-lock relayout |
+             | 7000  | 63,248    | 3.0fps | 666ms                |
+             | 2000  | 18,248    | 10.9   | 178ms                |
+             |  800  |  7,448    | 29.9   |  71ms                |
+             |  300  |  2,948    | 59.9   |  28ms                |
+             |    0  |    236    | 59.9   |   0.7ms              |
+
+           Six cards are on screen at 390px and ten at 1280px, in a document
+           1,227,442px tall. The overlay trays were reported as "choppy"
+           because of this and there is nothing wrong with the trays: at 3fps a
+           280ms tray animation gets one frame, so it jumps.
+
+           Re-measure with `tools/grid_metrics.py`, and only ever against a
+           library seeded to thousands — a few-hundred-item fixture cannot fail
+           these numbers, which is how this survived a browser check once
+           already.
+           ------------------------------------------------------------------ */
+
+        /* Items rendered at once. An order of magnitude below the measured
+           ceiling (60fps still held at 300) and well above what any viewport
+           shows, with room for a wide desktop grid's five columns. */
+        const GRID_WINDOW_ITEMS = 120;
+
+        /* Rows rendered beyond the viewport, so a fast flick does not outrun
+           the render and show blank rows. */
+        const GRID_OVERSCAN_ROWS = 4;
+
+        /* Entrance stagger, by ROW rather than by item, and capped.
+
+           This was `index * 0.03s` computed from the item's position in the
+           WHOLE library, which is a delay multiplied by a number the app does
+           not control: the 7,000th card waited 209.97 seconds. Measured, 6,611
+           of 7,000 cards were still `opacity: 0` twenty-five seconds after
+           load — the grid was not slow to animate, most of it was invisible,
+           and scrolling into it showed empty space where cards were.
+
+           An entrance animation softens an arrival the viewer is watching. A
+           delay longer than their attention is not a softer arrival, it is a
+           missing item. */
+        const GRID_STAGGER_PER_ROW = 0.04;
+        const GRID_STAGGER_CAP = 0.3;
+
+        // One view per tab. The inactive tab keeps whatever it last rendered,
+        // which is bounded now rather than a second full library.
+        const gridViews = new Map();
+
+        function gridView(type) {
+            if (gridViews.has(type)) return gridViews.get(type);
+
+            const grid = document.querySelector(`#${type}-content .media-grid`);
+            const view = {
+                type,
+                grid,
+                data: [],
+                first: 0,
+                rendered: 0,
+                perRow: 1,
+                rowPitch: 1,
+                rowGap: 0,
+                topSpacer: makeSpacer(),
+                bottomSpacer: makeSpacer(),
+            };
+
+            /* One delegated listener for the whole grid, not one per card.
+               There were 7,000 closures here; more to the point, a recycled
+               card must not be able to carry a stale handler for the item that
+               used to occupy it. */
+            grid.addEventListener('click', event => {
+                const card = event.target.closest('.media-item');
+                if (!card || !grid.contains(card)) return;
+                const item = view.data[Number(card.dataset.index)];
+                if (item) openModal(item, view.type);
+            });
+
+            gridViews.set(type, view);
+            return view;
+        }
+
+        /* A spacer stands in for the rows that are not rendered, so the
+           document keeps the height the full selection would occupy and the
+           viewer's scroll position means the same thing before and after the
+           window moves.
+
+           `grid-column: 1 / -1` is load-bearing. Without it `auto-fill` places
+           the spacer as an ordinary cell: it consumes a grid position, every
+           following card shifts one column left, and the row arithmetic goes
+           wrong in a way that reads as an off-by-one in the window rather than
+           as a layout bug. */
+        function makeSpacer() {
+            const spacer = document.createElement('div');
+            spacer.className = 'grid-spacer';
+            spacer.setAttribute('aria-hidden', 'true');
+            spacer.style.gridColumn = '1 / -1';
+            return spacer;
+        }
+
+        /* Geometry read from the rendered grid, never assumed.
+
+           `auto-fill` decides the column count from the available width, so a
+           column count derived from a breakpoint is wrong at every width the
+           breakpoint did not anticipate — the same class of mistake as the
+           hardcoded 280px backdrop height this project already paid for. */
+        function measureGrid(view) {
+            const styles = getComputedStyle(view.grid);
+            const columns = styles.gridTemplateColumns.split(' ').filter(Boolean);
+            view.perRow = Math.max(1, columns.length);
+            view.rowGap = parseFloat(styles.rowGap) || 0;
+            /* The grid is padded, so its border box starts 20px above its first
+               row. Measuring rows from the border box puts every row boundary a
+               fifth of a row out — not enough to look broken, enough to pick
+               the wrong row near the threshold. */
+            view.padTop = parseFloat(styles.paddingTop) || 0;
+
+            const card = view.grid.querySelector('.media-item');
+            const cardHeight = card ? card.getBoundingClientRect().height : 0;
+            // Fall back to one row of everything until a card exists to measure.
+            view.rowPitch = cardHeight > 0 ? cardHeight + view.rowGap : 0;
+        }
+
+        // Whole rows only: a partial row would leave a ragged edge mid-grid.
+        function windowRows(view) {
+            return Math.max(1, Math.ceil(GRID_WINDOW_ITEMS / view.perRow));
+        }
+
+        /* Which row the viewer is looking at. The grid's own offset is stable
+           regardless of the spacers, because what sits above the grid does not
+           change when the window moves. */
+        function firstVisibleRow(view) {
+            if (view.rowPitch <= 0) return 0;
+            const contentTop =
+                view.grid.getBoundingClientRect().top + window.scrollY + view.padTop;
+            return Math.floor((window.scrollY - contentTop) / view.rowPitch);
+        }
+
+        function desiredFirstIndex(view) {
+            const startRow = Math.max(0, firstVisibleRow(view) - GRID_OVERSCAN_ROWS);
+            return Math.min(startRow * view.perRow, Math.max(0, view.data.length - 1));
+        }
+
+        function renderWindow(view, first, animate) {
+            const total = view.data.length;
+            const perRow = view.perRow;
+            const rows = windowRows(view);
+            const count = Math.min(rows * perRow, total - first);
+
+            // Unobserve what is leaving. The observer would otherwise
+            // accumulate targets that are no longer in the document — the leak
+            // windowing exists to prevent, reintroduced through the back door.
+            view.grid.querySelectorAll('.poster').forEach(img => imageObserver.unobserve(img));
+
+            const fragment = document.createDocumentFragment();
+            for (let i = first; i < first + count; i++) {
+                fragment.appendChild(buildCard(view, i, animate ? i - first : -1));
+            }
+
+            const totalRows = Math.ceil(total / perRow);
+            const rowsBefore = Math.floor(first / perRow);
+            const rowsAfter = Math.max(0, totalRows - rowsBefore - Math.ceil(count / perRow));
+
+            /* A spacer standing in for zero rows is not zero-height — it is
+               still a grid item, so it still opens a row and still adds a gap.
+               It has to leave the layout entirely. */
+            sizeSpacer(view.topSpacer, rowsBefore, view);
+            sizeSpacer(view.bottomSpacer, rowsAfter, view);
+
+            view.grid.replaceChildren(view.topSpacer, fragment, view.bottomSpacer);
+
+            view.first = first;
+            view.rendered = count;
+
+            view.grid.querySelectorAll('.poster').forEach(img => imageObserver.observe(img));
+        }
+
+        function sizeSpacer(spacer, rows, view) {
+            if (rows <= 0) {
+                spacer.style.display = 'none';
+                spacer.style.height = '0px';
+                return;
+            }
+            spacer.style.display = '';
+            // The spacer's own trailing gap is part of the rows it replaces.
+            spacer.style.height = `${rows * view.rowPitch - view.rowGap}px`;
+        }
+
+        function buildCard(view, index, animationOrder) {
+            const item = view.data[index];
+            const type = view.type;
+
+            const mediaItem = document.createElement('div');
+            mediaItem.className = 'media-item';
+            mediaItem.dataset.id = item.id;
+            mediaItem.dataset.type = type;
+            // The delegated listener resolves the item through this, so a
+            // recycled element cannot open the item it used to hold.
+            mediaItem.dataset.index = String(index);
+
+            if (animationOrder >= 0) {
+                const row = Math.floor(animationOrder / view.perRow);
+                const delay = Math.min(row * GRID_STAGGER_PER_ROW, GRID_STAGGER_CAP);
+                mediaItem.style.opacity = '0';
+                mediaItem.style.transition = `opacity 0.3s ease ${delay}s, transform 0.3s ease ${delay}s`;
+                /* Flipped on the next frame rather than by a timer per card.
+                   There were 7,000 of those. One frame is all the browser needs
+                   to have taken the starting value. */
+                requestAnimationFrame(() => {
+                    mediaItem.style.opacity = '1';
+                });
+            }
+
+            const posterPath = type === 'movies' ?
+                dataUrl('posters', 'movies', `${item.id}.jpg`) :
+                dataUrl('posters', 'tvshows', `${item.id}.jpg`);
+
+            const addedDate = formatDate(item.addedAt);
+
+            mediaItem.innerHTML = `
+                <div class="poster-container">
+                    <div class="poster-placeholder">
+                        <div class="loading-spinner"></div>
+                    </div>
+                    <img data-src="${posterPath}"
+                         alt="${item.title}"
+                         class="poster">
+                </div>
+                <div class="media-info">
+                    <div class="media-title">${item.title}</div>
+                    <div class="media-year">${item.year}</div>
+                    <div class="media-added">Added: ${addedDate}</div>
+                </div>
+            `;
+
+            return mediaItem;
+        }
+
+        /* Re-render only when the window has actually moved. Scrolling inside
+           the current window must cost nothing, or the fix reintroduces
+           per-frame work by another route. */
+        function updateGridWindow(view) {
+            if (!view || view.data.length === 0 || view.rowPitch <= 0) return;
+            const first = desiredFirstIndex(view);
+            if (first === view.first) return;
+            renderWindow(view, first, false);
+        }
+
+        function activeGridView() {
+            const activeTab = document.querySelector('.tab.active');
+            return activeTab ? gridViews.get(activeTab.dataset.content) : null;
+        }
+
+        (function watchScrollForWindow() {
+            let queued = false;
+            function schedule() {
+                if (queued) return;
+                queued = true;
+                requestAnimationFrame(() => {
+                    queued = false;
+                    updateGridWindow(activeGridView());
+                });
+            }
+            window.addEventListener('scroll', schedule, { passive: true });
+            window.addEventListener('resize', () => {
+                const view = activeGridView();
+                if (!view || view.data.length === 0) return;
+                // `perRow` changes with width, so every row index computed for
+                // the old column count is wrong. Re-measure, then re-render
+                // from where the viewer is rather than from the top.
+                measureGrid(view);
+                renderWindow(view, desiredFirstIndex(view), false);
+            });
+        })();
+
         // Display media items with enhanced animations
         function displayMedia(data, type) {
             const contentDiv = document.querySelector(`#${type}-content`);
@@ -2703,57 +3012,29 @@
             noResultsDiv.classList.remove('active');
             grid.style.display = 'grid';
 
-            // Create and append items with staggered animation
-            data.forEach((item, index) => {
-                const mediaItem = document.createElement('div');
-                mediaItem.className = 'media-item';
-                mediaItem.dataset.id = item.id;
-                mediaItem.dataset.type = type;
-                mediaItem.style.opacity = '0';
-                mediaItem.style.transition = `opacity 0.3s ease ${index * 0.03}s, transform 0.3s ease ${index * 0.03}s`;
+            /* Render a window, not the library.
 
-                const posterPath = type === 'movies' ?
-                    dataUrl('posters', 'movies', `${item.id}.jpg`) :
-                    dataUrl('posters', 'tvshows', `${item.id}.jpg`);
+               The selection has changed, so this always starts at the top —
+               a new search or sort showing its results from wherever the
+               viewer happened to be scrolled would be wrong. The window then
+               follows the scroll from there.
 
-                // Format the added date
-                const addedDate = formatDate(item.addedAt);
+               Geometry has to be measured from a rendered card, so the first
+               pass renders and the second pass sizes the spacers against real
+               numbers. Both are cheap: it is one window either way. */
+            const view = gridView(type);
+            view.data = data;
+            view.first = -1;
 
-                // Get primary genre if available
-                const primaryGenre = item.genres && item.genres.length > 0 ? item.genres[0] : 'Unknown';
+            measureGrid(view);
+            renderWindow(view, 0, true);
 
-                mediaItem.innerHTML = `
-                    <div class="poster-container">
-                        <div class="poster-placeholder">
-                            <div class="loading-spinner"></div>
-                        </div>
-                        <img data-src="${posterPath}" 
-                             alt="${item.title}" 
-                             class="poster">
-                    </div>
-                    <div class="media-info">
-                        <div class="media-title">${item.title}</div>
-                        <div class="media-year">${item.year}</div>
-                        <div class="media-added">Added: ${addedDate}</div>
-                    </div>
-                `;
-
-                grid.appendChild(mediaItem);
-
-                // Trigger animation after a small delay
-                setTimeout(() => {
-                    mediaItem.style.opacity = '1';
-                }, 10);
-
-                // Observe the image for lazy loading
-                const img = mediaItem.querySelector('.poster');
-                imageObserver.observe(img);
-
-                // Add click event to open modal
-                mediaItem.addEventListener('click', () => {
-                    openModal(item, type);
-                });
-            });
+            if (view.rowPitch <= 0) {
+                // No card had been laid out yet, so the pitch was unknown and
+                // the spacers were sized against nothing. Now one exists.
+                measureGrid(view);
+                renderWindow(view, 0, true);
+            }
         }
 
         // Detail overlay. Open state lives in the Alpine scope; the close
