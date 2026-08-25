@@ -74,14 +74,20 @@ All six predate the rewrite. `screenshot-details-*` show the detail view as a
 centred box with a corner close button — the presentation the tray conversion
 replaced.
 
-On 2026-08-25 the image block was **commented out of `README.md`** rather than
+On 2026-08-25 the image block was **removed from `README.md`** rather than
 shipped wrong: a picture of an interface that no longer exists is the first
-thing a prospective user sees, and worse than no picture. The files stay in
-`assets/`, the block stays in the README as a comment, and re-adding them is
-uncommenting it once new ones exist.
+thing a prospective user sees, and worse than no picture.
 
-**Still outstanding.** Needs a real media library, so it remains a release-time
-task — now a follow-up rather than a blocker.
+The **`.png` files stay in `assets/`**, deliberately. The README referenced them
+by absolute `raw.githubusercontent.com/.../main/assets/...` URLs, and those URLs
+are not necessarily reachable only from here — Docker Hub mirrors this README,
+and anything else that ever linked one would 404 the moment the file left the
+branch. Removing the markdown costs nothing; removing the files is outward-facing
+and has not been assessed.
+
+**Still outstanding.** New screenshots need a real media library, so this is a
+release-time follow-up rather than a blocker. Add them back as an ordinary image
+block; there is no commented-out scaffolding to restore.
 
 ---
 

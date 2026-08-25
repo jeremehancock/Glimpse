@@ -2,20 +2,6 @@
 
 A sleek, responsive web application for browsing and viewing your Plex, Jellyfin, or Emby media library content. This dockerized solution fetches metadata and artwork from your media server and presents it in an elegant, user-friendly interface with support for multiple media servers.
 
-<!--
-  Screenshots removed deliberately, not lost.
-
-  All six predated the interface rewrite: `screenshot-details-*` showed the
-  detail view as a centred box with a corner close button, which is the
-  presentation the tray conversion replaced. They are still in `assets/` and
-  still referenced from the `main` branch by their raw.githubusercontent URLs,
-  so re-adding them is uncommenting this block once new ones are in place.
-
-  Showing a picture of an interface that no longer exists is worse than showing
-  none: it is the first thing a prospective user sees, and it would be a
-  promise the app does not keep.
--->
-
 ## ✨ Features
 
 - **Modern Interface**: Clean, responsive design that works on mobile and desktop — menus and details open as app-style trays on phones, swipe down to dismiss
