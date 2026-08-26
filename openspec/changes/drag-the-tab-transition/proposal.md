@@ -62,8 +62,12 @@ None.
 
 - `media-browsing`: the requirement "A committed swipe moves the grid in the
   direction of the gesture" describes a transition that plays *after* a gesture
-  resolves. It is replaced by requirements covering a gesture that is itself the
-  transition: the tabs track the touch, the gesture can be abandoned, the axis
+  resolves. It is **removed and replaced** rather than modified — one of its
+  scenarios, "A swipe that does not commit does not move the grid", becomes
+  false rather than reworded, since a drag moves the grid throughout and springs
+  back on release. Editing around it would leave a scenario name asserting the
+  opposite of what the application does. Its place is taken by requirements
+  covering a gesture that is itself the transition: the tabs track the touch, the gesture can be abandoned, the axis
   is committed once and held, the ends resist, and the window does not move
   while the tabs do. The requirements covering render-before-visible, the
   hidden scroll reset, the shared gate with the gesture, and correctness

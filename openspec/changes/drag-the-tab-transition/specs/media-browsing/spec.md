@@ -1,6 +1,26 @@
-## MODIFIED Requirements
+## REMOVED Requirements
 
 ### Requirement: A committed swipe moves the grid in the direction of the gesture
+
+**Reason**: The gesture is now the transition rather than something a transition
+plays back after it, and one of this requirement's scenarios has become false
+rather than merely reworded. "A swipe that does not commit does not move the
+grid" was the correct guarantee for a discrete gesture evaluated once at
+`touchend`. Under a drag the grid moves for the whole gesture and returns to
+rest on release, which is the entire point of the change — so keeping the
+requirement and editing around that scenario would leave a scenario name
+asserting the opposite of the behaviour it documents.
+
+**Migration**: Replaced in full by "A tab drag moves both grids with the finger"
+below. The two guarantees that survive are carried into it verbatim in
+substance: the outgoing tab leaves toward the swipe with the incoming arriving
+from the opposite edge (now "A committed drag completes the travel"), and
+reduced motion is honoured (unchanged in name and intent). Nothing that was
+required of a committed swipe stops being required of a committed drag.
+
+## ADDED Requirements
+
+### Requirement: A tab drag moves both grids with the finger
 
 A horizontal touch drag on the grid SHALL move the tabs with the finger. The
 outgoing tab SHALL track the touch, and the incoming tab SHALL enter from the
@@ -89,8 +109,6 @@ whichever way the thumb went.
   them directly
 - **AND** the settle after release SHALL be effectively instant, with the
   incoming tab correctly rendered and active
-
-## ADDED Requirements
 
 ### Requirement: The gesture's axis is decided once, early, and held
 
