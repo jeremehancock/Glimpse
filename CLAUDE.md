@@ -422,14 +422,13 @@ those tags.
     decision rather than a look.** A parallax lag was built first — the incoming
     tab a third of a viewport out, at a third of the speed — because that is
     what the platform does. At that distance the two grids overlap for the whole
-    gesture, and both carry the same `z-index` (they need it to clear the drag
-    scrim), so paint order fell back to **document order**: `#tvshows-content`
-    is second in the markup, so TV Shows painted over Movies *in both
-    directions*. It reached the user as "the TV show grid is always on top".
-    A full viewport apart, the question cannot arise. There is no ratio token —
-    pinned at 1 it would be a knob that does nothing. The lift's `scale(0.94)`
-    supplies the layered quality instead: it makes each tab ~23px narrower than
-    the viewport, so a gap opens between them.
+    gesture, and both carry the same `z-index`, so paint order fell back to
+    **document order**: `#tvshows-content` is second in the markup, so TV Shows
+    painted over Movies *in both directions*. It reached the user as "the TV
+    show grid is always on top". A full viewport apart, the question cannot
+    arise. There is no ratio token — pinned at 1 it would be a knob that does
+    nothing. The two panels tile the viewport: each is exactly one viewport
+    wide, so there is no gap between them at any offset either.
   - **Freezing BOTH is what makes the gesture abandonable.** The earlier version
     froze only the outgoing tab and reset the page immediately, which is fine for
     a transition that always completes. A drag can be let go of, and a page
@@ -467,28 +466,13 @@ those tags.
   - **A tab arriving on a slide does not also stagger its cards.** The entrance
     fade softens a grid appearing *in place*; a tab crossing the viewport is
     already a soft arrival, and the stagger was the largest cost on that frame.
-  - **Horizontal translate only — and the lift's `scale` is the ONE exception,
-    which costs TWO safeguards, not one.** `firstVisibleRow()` reads
-    `getBoundingClientRect().top`, so a `translateY` or a scale re-windows the
-    grid mid-flight against a position the viewer never occupied.
-    1. `updateGridWindow()` **refuses outright** while a gesture is live. Do not
-       substitute the fact that a pinned tab receives no scroll events — that is
-       a consequence of the freeze, not a property of the lift.
-    2. **`transform-origin` must be the viewport centre in the element's own
-       coordinates**, set per gesture by `pinTab()`. This one shipped to a user.
-       The default origin is the element's own centre, and a tab holding 7,000
-       items is 1,227,442px tall — so scaling by 0.94 about a point ~600,000px
-       below the screen threw the first card **+36,791px** downward. The grid
-       left the screen the instant a thumb touched it.
-    - **The second symptom is the lesson.** The displacement scales with library
-      size, so the 7,000-item tab vanished while the 1,200-item one barely
-      moved, and it reported as *"it always shows the TV Shows grid whichever
-      way I swipe"* — a routing bug that did not exist. One cause, two
-      symptoms, and the plausible one was wrong.
-    - **A moved rect is an arithmetic hazard AND a visible one.** Guard 1 was
-      in place and correct and did nothing for this. Reasoning about a transform
-      only in terms of what it does to the *maths* is how the far larger problem
-      — what it does to the *picture* — went unconsidered.
+  - **Horizontal translate only. There is no exception, and there was one.**
+    `firstVisibleRow()` reads `getBoundingClientRect().top`, so a `translateY` —
+    or a scale — re-windows the grid mid-flight against a position the viewer
+    never occupied. `updateGridWindow()` therefore **refuses outright** while a
+    gesture is live. Do not substitute the fact that a pinned tab receives no
+    scroll events: that is a consequence of the freeze, not a rule anyone
+    stated. The refusal predates the lift and outlives it.
   - **The pinned tabs are offset by `contentTop`, never by `-scrollY` alone.**
     `.content` starts below the header, and the header shrinks on scroll so it
     is not a constant to hardcode. `beginTabTransition()` therefore takes one
@@ -518,16 +502,41 @@ those tags.
     query.** Same pairing rule as the affordances: two conditions describing one
     capability drift, and this repo has already shipped a pair that reached 992px
     and 768px independently.
-  - **The lift is a SCALE AND A SCRIM.** A drop shadow and a corner radius were
-    both built and both removed, for one reason that is the first fact to hold
-    about these panels: they are as tall as the whole library and pinned at the
-    captured offset, so only one viewport of each is ever on screen and neither
-    end of them is. A `box-shadow` therefore renders only as a blurred band down
-    each vertical edge, tracking the thumb — and with the tabs 24px apart, two
-    of those bands land in the gap together. It shipped, and read as noise. A
-    radius renders nothing whatsoever. That the panel is *enormous* is the same
-    fact behind the transform-origin bug above: with these tabs, their height is
-    the first thing to reason from, not the last.
+  - **A dragged tab is MOVED, and nothing else is done to it.** Four ways of
+    raising it were tried; all four are gone, and the one that shipped is the
+    reason this is now a rule rather than a preference.
+    - **The scale is what a user finally reported, as "the grid drops down".**
+      A `scale(0.94)` anchored to the viewport's midpoint pulls everything above
+      that midpoint toward it — **~23px on a phone**, arriving with no easing
+      the instant the gesture is claimed and reversing on release. Vertical
+      motion in a gesture that means nothing but horizontal does not read as
+      depth; it reads as the page malfunctioning, and it lands *before* any
+      horizontal travel, so it is the first thing seen.
+    - **It shipped twice broken, and the first one is the sharper lesson.**
+      `transform-origin` defaults to the element's own centre, and a tab holding
+      7,000 items is 1,227,442px tall — so scaling about a point ~600,000px
+      below the screen threw the first card **+36,791px** downward. The
+      displacement scaled with library size, so the 7,000-item tab vanished
+      while the 1,200-item one barely moved, and it reported as *"it always
+      shows the TV Shows grid whichever way I swipe"* — a routing bug that did
+      not exist. One cause, two symptoms, and the plausible one was wrong.
+      Anchoring the origin to the viewport bounded that to the 23px above.
+    - **A moved rect is an arithmetic hazard AND a visible one.** The windowing
+      refusal was in place and correct throughout and did nothing for either
+      symptom. Reasoning about a transform only in terms of what it does to the
+      *maths* is how the far larger problem — what it does to the *picture* —
+      went unconsidered, twice.
+    - **The scrim went with the scale, because it had nowhere left to render.**
+      Each panel is one viewport wide, so unscaled the pair tiles the screen at
+      every offset and a dim behind them is covered on every frame. Kept, it
+      would be a full-screen fixed element that can never be seen — live code
+      that cannot succeed, which is the shape this repo has shipped twice.
+    - **The shadow and the radius never shipped, for the reason to hold first
+      about these panels:** they are as tall as the whole library and pinned at
+      the captured offset, so only one viewport of one is ever on screen and
+      neither of its ends is. A `box-shadow` renders solely as a blurred band
+      down each vertical edge tracking the thumb; a radius renders nothing
+      whatsoever. Their height is the first thing to reason from, not the last.
   - **The first-load swipe tip stays.** It was removed on the argument that a
     drag demonstrates itself; it only demonstrates itself to someone who already
     tries it, and the gesture has no visible affordance at rest. What is gone is

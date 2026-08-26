@@ -409,17 +409,22 @@ is the fact the viewer is missing.
 While a tab drag is live, the application SHALL NOT recompute which rows either
 grid renders.
 
-The window is derived from the grid's measured position on screen. The drag
-applies a scale to the moving tab as part of its lift, which changes that
-measurement for every card in it — so a window computed during the drag would
-be computed against a position the viewer never occupied, and would present as
-an off-by-one in the grid rather than as a transform problem.
+The window is derived from the grid's measured position on screen. A tab in a
+drag is pinned out of the scroller at a captured offset, so its measured position
+during the gesture is not the position the viewer is scrolled to — a window
+computed from it would be computed against a position the viewer never occupied,
+and would present as an off-by-one in the grid rather than as a transform
+problem.
 
 This SHALL be an explicit refusal in the code that recomputes the window. It
 SHALL NOT rest on the incidental fact that a frozen tab cannot receive scroll
 events: a safety that is implied by a mechanism rather than stated is a safety
-that disappears when the mechanism changes, and this project has already
-shipped a pair of rules that were meant to be one condition and drifted apart.
+that disappears when the mechanism changes, and this project has already shipped
+a pair of rules that were meant to be one condition and drifted apart.
+
+That this refusal no longer has a scale to protect against does not weaken it.
+It was written when the drag scaled the moving tabs, and the scale is gone; the
+refusal stands on the freeze alone and SHALL remain stated in its own right.
 
 #### Scenario: No re-window during a drag
 
@@ -435,7 +440,13 @@ shipped a pair of rules that were meant to be one condition and drifted apart.
 
 - **WHEN** the tabs are moved by a drag or a settle
 - **THEN** the offset that moves them SHALL be horizontal, with no vertical
-  component
+  component and no scale
+
+#### Scenario: The transform has no exception
+
+- **WHEN** the transform applied to a tab during a drag, a settle or a
+  transition is inspected
+- **THEN** it SHALL consist of a horizontal translation and nothing else
 
 ### Requirement: An incoming tab is re-rendered unless it is provably current
 
@@ -518,8 +529,7 @@ control, or a second drag beginning.
 
 Resolution SHALL run from a single routine that is safe to invoke repeatedly and
 that clears everything the gesture set — both tabs' pinning and transforms, the
-lift, the scrim, the horizontal containment, the window refusal, and any pending
-frame callback.
+horizontal containment, the window refusal, and any pending frame callback.
 
 A drag takes two tabs out of the document's scroller and stops the grid
 re-windowing. Leaving that in place because a touch was cancelled by an incoming

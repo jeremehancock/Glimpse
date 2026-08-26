@@ -226,7 +226,7 @@ def test_scroll_from_inside_an_overlay_goes_through_the_overlay_system(index):
         # setup and the shared teardown rather than in `switchTabAnimated()`:
         # the drag and the slide from rest use one freeze, and an abandoned drag
         # scrolls BACK from that teardown.
-        'function beginTabTransition(contentName, outgoing, incoming, lifted) {',
+        'function beginTabTransition(contentName, outgoing, incoming) {',
         'function endTabTransition() {',
     ):
         body = block_after(index, opener)
