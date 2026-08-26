@@ -99,30 +99,35 @@
        durations back to decide where the tabs go and how long they take to
        settle.
 
-       --tab-drag-parallax is the fraction of the outgoing tab's travel that the
-       incoming tab makes. It is ALSO how far out the incoming tab parks at
-       rest, and the two are the same number by necessity, not by coincidence:
-       a tab that enters at a third of the finger's speed must start a third of
-       a viewport out, or it does not arrive as the outgoing one leaves. Both
-       transforms read this one token so they cannot disagree.
+       THERE IS NO PARALLAX RATIO, and there was one. The incoming tab used to
+       enter at a third of the outgoing tab's speed, parked a third of a viewport
+       out. That is what iOS does, and here it was wrong: at a third of a
+       viewport the two grids OVERLAP for the whole gesture, and which one is on
+       top is then decided by document order rather than by direction — so
+       TV Shows painted over Movies whichever way the thumb went. The tabs move
+       together now, a full viewport apart, edge to edge: one leaves as the other
+       arrives, and neither is ever over the other. A ratio fixed at 1 would be a
+       knob that does nothing, so it is gone rather than set.
 
        --tab-drag-lift is the scale the moving tab takes at thumb-down. It is
        admissible only because the grid refuses to re-window while a drag is
        live — a scale moves every card's measured top, which is the windowing
-       arithmetic's only input. Change one, check the other.
+       arithmetic's only input. Change one, check the other. It also opens the
+       gap between the two tabs: at 0.94 each is 23px narrower than the viewport,
+       so the pair read as two cards rather than one sliding sheet.
 
        --dur-tab-settle-min is the floor under a release. The settle's duration
        scales with the distance still to travel, so a tab released at 95% would
        otherwise finish in a few milliseconds and read as a snap rather than as
        the end of a movement. --dur-tab remains the ceiling: a committed swipe
        that barely moved takes exactly as long as the transition did before this
-       gesture existed. */
+       gesture existed.
+
        There is no radius token here on purpose. A rounded corner is the obvious
        third ingredient of a lift and it would draw nothing — the frozen tab is
        as tall as the library, so its corners are not on screen. index.html says
        so at the rule; this is the other half of that note, for anyone adding
        one here. */
-    --tab-drag-parallax: 0.33;
     --tab-drag-lift: 0.94;
     --tab-drag-elevation: var(--elev-4);
     --tab-drag-scrim: rgba(0, 0, 0, 0.28);

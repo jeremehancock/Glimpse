@@ -262,27 +262,53 @@ Rejected because the scale is what makes the effect read as a card rather than
 a shadow, and because the guard is worth having on its own — a re-window
 computed mid-gesture would be a defect whether or not a scale caused it.
 
-### Parallax: the outgoing tracks 1:1, the incoming enters at a third
+### The tabs move edge to edge. Parallax was tried and reverted
 
 ```
 finger travels 100px left
 
-  outgoing   translateX(-100px)          1.0×, from 0
-  incoming   translateX(+130px)          0.33×, from +33vw
+  outgoing   translateX(-100px)          1.0x, from 0
+  incoming   translateX(+290px)          1.0x, from +100vw
 ```
 
-The incoming tab parks a third of a viewport out rather than a full one, and
-closes that third over the same drag that carries the outgoing tab a full
-viewport. The two arrive together.
+Both tabs track the finger at the same rate, one viewport apart, so the pair
+moves as a single strip. One leaves exactly as fast as the other arrives.
 
-This is what makes the tabs read as layered rather than as one strip sliding
-past a window. It also means the incoming tab is a third of a viewport out at
-rest instead of a full one, which halves the horizontal overflow the transition
-has to contain — measured previously at 750px against a 390px `clientWidth`.
-The containment is still required and still scoped to the gesture.
+**The first version did the platform-standard thing and it was wrong here.** The
+incoming tab parked a third of a viewport out and travelled at a third of the
+finger's speed — the iOS push/pop parallax, chosen deliberately over a locked
+1:1 because it reads as layered rather than flat.
 
-The ratio lives in `tokens.css` as one number. Both transforms read it, so they
-cannot disagree about how far apart the tabs are.
+At a third of a viewport the two grids **overlap for the entire gesture**. That
+is not a side effect of the parallax, it is what the parallax IS: the incoming
+view slides in over the outgoing one. Which of the two is drawn on top then has
+to be decided, and nothing decided it — both tabs carry the same `z-index` (they
+need it to clear the drag scrim), so paint order fell back to document order.
+`#tvshows-content` comes second in the markup, so **TV Shows painted over Movies
+in both directions**.
+
+Reported as *"the TV show grid is always on top"*, which is precisely accurate
+and sounds like a z-index bug. It is a geometry decision: at a full viewport
+apart the question cannot arise at all.
+
+Fixing the z-order instead was possible — rank the incoming tab above the
+outgoing one — but it keeps a gesture in which one grid obscures another the
+viewer is still dragging, and "side by side, one going away and the other
+replacing it" is what was actually wanted.
+
+Two consequences worth recording:
+
+- **The horizontal overflow is back to its full measured extent.** 750px against
+  a 390px `clientWidth`; the parallax had halved it. The containment was always
+  required and is unchanged.
+- **The lift now does a second job.** At `scale(0.94)` each tab is ~23px
+  narrower than the viewport, so a gap opens between them and the pair reads as
+  two cards rather than one continuous sheet. That is the layered quality the
+  parallax was chosen for, obtained without the overlap.
+
+There is no ratio token any more. Pinned at 1 it would be a knob that does
+nothing, and this project treats a declaration that appears to control something
+and does not as worse than none.
 
 ### Commit is distance OR velocity, and rest is the third outcome
 

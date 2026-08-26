@@ -4,8 +4,11 @@
 
 A horizontal touch drag on the grid SHALL move the tabs with the finger. The
 outgoing tab SHALL track the touch, and the incoming tab SHALL enter from the
-opposite edge at a fixed, smaller fraction of that travel, both updating for as
-long as the touch continues.
+opposite edge at the same rate, one viewport apart, both updating for as long as
+the touch continues.
+
+The two tabs SHALL NOT overlap at any point in the gesture. One leaves as the
+other arrives; neither is ever drawn over the other.
 
 On release the gesture SHALL resolve to exactly one of three outcomes: it
 commits and the tabs complete their travel, it is abandoned and the tabs return
@@ -18,8 +21,12 @@ not see that the gesture was working, could not see how far was left, and could
 not change their mind. The motion is the confirmation, and it has to happen
 while the thumb is still down to be one.
 
-The parallax ratio between the two tabs SHALL be stated once and read by both
-transforms, so they cannot disagree about how far apart the tabs are.
+Overlapping them was tried and reverted. An incoming tab entering at a fraction
+of the outgoing tab's speed — the familiar platform parallax — necessarily sits
+on top of it for the whole gesture, and which of the two is drawn above the
+other is then decided by their order in the document rather than by the
+direction of travel. The result was one tab appearing to win every time,
+whichever way the thumb went.
 
 #### Scenario: The tabs follow the finger
 
@@ -27,12 +34,18 @@ transforms, so they cannot disagree about how far apart the tabs are.
 - **THEN** the outgoing tab's horizontal offset SHALL correspond to the
   distance the touch has travelled, updating as the touch moves
 
-#### Scenario: The incoming tab enters behind the outgoing one
+#### Scenario: The incoming tab arrives as the outgoing one leaves
 
 - **WHEN** a horizontal drag is in progress
-- **THEN** the incoming tab SHALL be visible entering from the opposite edge,
-  travelling a smaller fraction of the same distance, and SHALL arrive at rest
-  at the same moment the outgoing tab completes its travel
+- **THEN** the incoming tab SHALL be visible entering from the opposite edge at
+  the same rate the outgoing tab leaves, and SHALL arrive at rest at the same
+  moment the outgoing tab completes its travel
+
+#### Scenario: Neither tab is ever drawn over the other
+
+- **WHEN** a horizontal drag is in progress, in either direction
+- **THEN** the two tabs SHALL remain one viewport apart and SHALL NOT overlap,
+  so which tab is visible depends only on how far the drag has travelled
 
 #### Scenario: Reversing the drag reverses the tabs
 

@@ -411,14 +411,25 @@ those tags.
       drifts to the top a beat later. Measured: still at 3000px two frames in,
       settling at 12px rather than 0.
 - **The tab swipe is a drag, and every part of it is measured.** The tabs follow
-  the thumb — the outgoing one 1:1, the incoming one at `--tab-drag-parallax` of
-  that travel — and the release commits, abandons, or springs back from a
-  resisted end. **Both** tabs are frozen with `position: fixed` so they leave the
+  the thumb — both 1:1, a full viewport apart — and the release commits,
+  abandons, or springs back from a resisted end. **Both** tabs are frozen with `position: fixed` so they leave the
   scroller; the outgoing one at `-scrollY`, the incoming one at 0. The page is
   then set to 0 in the one frame nothing on screen reflects it. That is what
   makes it one movement rather than a jump followed by a slide — both tabs share
   one document scroll, so there is no other way to show the incoming tab's top
   while the outgoing shows where the viewer was.
+  - **The tabs are EDGE TO EDGE, never overlapping, and that is a correctness
+    decision rather than a look.** A parallax lag was built first — the incoming
+    tab a third of a viewport out, at a third of the speed — because that is
+    what the platform does. At that distance the two grids overlap for the whole
+    gesture, and both carry the same `z-index` (they need it to clear the drag
+    scrim), so paint order fell back to **document order**: `#tvshows-content`
+    is second in the markup, so TV Shows painted over Movies *in both
+    directions*. It reached the user as "the TV show grid is always on top".
+    A full viewport apart, the question cannot arise. There is no ratio token —
+    pinned at 1 it would be a knob that does nothing. The lift's `scale(0.94)`
+    supplies the layered quality instead: it makes each tab ~23px narrower than
+    the viewport, so a gap opens between them.
   - **Freezing BOTH is what makes the gesture abandonable.** The earlier version
     froze only the outgoing tab and reset the page immediately, which is fine for
     a transition that always completes. A drag can be let go of, and a page

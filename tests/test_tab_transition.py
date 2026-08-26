@@ -598,16 +598,45 @@ def test_the_settle_is_timed_from_the_distance_remaining(index, tokens):
 
 
 def test_the_drag_numbers_live_in_tokens(index, tokens):
-    """Two files must agree about the parallax, so one of them owns it.
-
-    The ratio is also how far out the incoming tab parks -- a tab entering at a
-    third of the finger's speed must start a third of a viewport out, or it does
-    not arrive as the outgoing one leaves. Two literals drift; one token cannot.
-    """
-    for token in ('--tab-drag-parallax:', '--tab-drag-lift:', '--tab-drag-scrim:'):
+    """Two files must agree about the lift, so one of them owns it."""
+    for token in ('--tab-drag-lift:', '--tab-drag-scrim:', '--dur-tab-settle-min:'):
         assert token in tokens, f'tokens.css does not declare {token}'
-    for read in ("readToken('--tab-drag-parallax'", "readToken('--tab-drag-lift'"):
-        assert read in index, f'index.html restates a token instead of reading it: {read}'
+    assert "readToken('--tab-drag-lift'" in index, (
+        'index.html restates the lift instead of reading it from the token'
+    )
+
+
+def test_the_tabs_move_edge_to_edge_and_never_overlap(index, tokens):
+    """This one reached the user too, and the symptom named the wrong thing.
+
+    The incoming tab used to park a third of a viewport out and travel at a
+    third of the finger's speed -- the iOS parallax. At that distance the two
+    grids overlap for the entire gesture, and since both carry the same z-index
+    the winner is decided by document order: `#tvshows-content` is second, so
+    TV Shows painted over Movies in BOTH directions. It was reported as "the TV
+    show grid is always on top", which is exactly what it was, and which sounds
+    like a routing or z-index bug rather than a geometry one.
+
+    Edge to edge the question cannot arise. A ratio pinned at 1 would be a knob
+    that does nothing, so there must not be one.
+    """
+    assert '--tab-drag-parallax' not in tokens, (
+        'the parallax ratio is back in tokens.css -- at anything below 1 the '
+        'tabs overlap and document order decides which is visible'
+    )
+    assert 'TAB_PARALLAX' not in index, 'the parallax ratio is back in index.html'
+
+    park = function_body(index, 'parkOffset')
+    assert re.search(r'\*\s*width\s*;', park), (
+        'the incoming tab does not park a FULL viewport out, so it overlaps the '
+        'outgoing one for the whole drag'
+    )
+
+    tracker = function_body(index, 'trackTabDrag')
+    assert re.search(r'park \+ drag\.offset\}px', tracker), (
+        'the incoming tab travels at a different rate from the outgoing one, so '
+        'the gap between them changes during the drag and they overlap'
+    )
 
 
 def test_the_lift_declares_no_radius_it_cannot_draw(index):

@@ -718,7 +718,15 @@
         /* Above the scrim, below the header. Both are needed: a positioned
            element with `z-index: auto` paints in DOM order, and `html::after`
            comes after `body`, so without this the scrim would paint over the
-           very tabs it exists to sit behind. */
+           very tabs it exists to sit behind.
+
+           The two tabs share this value, and that is safe ONLY because they no
+           longer overlap — they sit a full viewport apart. It was not safe when
+           the incoming tab parked a third of a viewport out: equal z-index means
+           document order decides, `#tvshows-content` comes second, and TV Shows
+           therefore painted over Movies in both directions. If anything ever
+           puts these two back on top of each other, this is where the ordering
+           has to become explicit rather than inherited from the markup. */
         .content.tab-leaving,
         .content.tab-entering {
             z-index: 1;
@@ -738,8 +746,7 @@
         /* An incoming tab parked off screen makes the document wider than the
            viewport. Measured at 390px with the tab a full viewport out:
            scrollWidth reached 750px against a 390px clientWidth, so this is a
-           real scrollbar and not a precaution. The parallax parks it a third of
-           a viewport out instead, which is less overflow and still overflow.
+           real scrollbar and not a precaution.
 
            Scoped to the gesture's duration — the class is removed by the same
            teardown that clears the transforms, so containment cannot outlive the
@@ -2523,7 +2530,6 @@
 
         const TAB_TRANSITION_MS = readToken('--dur-tab', 280);
         const TAB_SETTLE_MIN_MS = readToken('--dur-tab-settle-min', 120);
-        const TAB_PARALLAX = readToken('--tab-drag-parallax', 0.33);
         const TAB_LIFT = readToken('--tab-drag-lift', 0.94);
 
         /* Where the gesture is claimed. Small enough to precede a scroll, large
@@ -2877,16 +2883,23 @@
              release         commit, abandon, or spring back from a resisted end
            ------------------------------------------------------------------ */
 
-        /* Where the incoming tab rests before it starts arriving: a parallax
-           fraction of a viewport out, on the side it comes from.
+        /* Where the incoming tab rests before it starts arriving: a FULL
+           viewport out, on the side it comes from.
 
-           The same fraction governs how fast it travels, and that is not a
-           coincidence to be tidied away — a tab entering at a third of the
-           finger's speed must start a third of a viewport out, or it does not
-           arrive as the outgoing one leaves. One token, read once, so the two
-           cannot be given different values. */
+           A full viewport and not a fraction of one, so the two tabs are edge to
+           edge and never overlap. The first version parked it a third of a
+           viewport out and moved it at a third of the finger's speed — the
+           iOS parallax — and the two grids then sat on top of each other for the
+           whole gesture. Which one won was decided by document order, because
+           both carry the same z-index and `#tvshows-content` comes second, so
+           TV Shows painted over Movies in BOTH directions. It read as the drag
+           always going the same way.
+
+           Edge to edge, the question cannot arise: the tabs move together, one
+           leaving exactly as fast as the other arrives, with the lift's scale
+           opening a small gap between them so they read as two cards. */
         function parkOffset(direction, width) {
-            return (direction === 'forward' ? 1 : -1) * width * TAB_PARALLAX;
+            return (direction === 'forward' ? 1 : -1) * width;
         }
 
         function beginTabDrag(contentName, outgoing, incoming, direction, startX) {
@@ -2982,16 +2995,14 @@
                     return;
                 }
 
-                /* The outgoing tab tracks the finger exactly; the incoming one
-                   closes its parked third over the same travel. At a full
-                   viewport of movement the first has gone a viewport and the
-                   second has reached zero — they arrive together, which is what
-                   makes them read as layered rather than as one strip. */
+                /* Both tabs track the finger at the same rate, a viewport
+                   apart. The pair moves as one strip: the outgoing tab's
+                   trailing edge and the incoming tab's leading edge stay
+                   exactly a viewport apart for the whole gesture, so one is
+                   always replacing the other rather than covering it. */
                 const park = parkOffset(drag.direction, drag.width);
                 record.outgoing.style.setProperty('--tab-shift', `${drag.offset}px`);
-                record.incoming.style.setProperty(
-                    '--tab-shift', `${park + drag.offset * TAB_PARALLAX}px`
-                );
+                record.incoming.style.setProperty('--tab-shift', `${park + drag.offset}px`);
             });
         }
 

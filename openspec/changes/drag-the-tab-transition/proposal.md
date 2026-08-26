@@ -12,9 +12,11 @@ with their thumb. The grid should too.
 
 ## What Changes
 
-- **The tabs follow the finger.** Once a touch is recognised as horizontal, the
-  outgoing tab tracks it one-to-one and the incoming tab enters behind it with a
-  parallax lag, both updating every frame until the thumb lifts.
+- **The tabs follow the finger, edge to edge.** Once a touch is recognised as
+  horizontal, both tabs track it one-to-one, a viewport apart, updating every
+  frame until the thumb lifts — one leaving exactly as the other arrives, with
+  neither ever drawn over the other. (A parallax lag was built first and
+  reverted: overlapping tabs made document order decide which was visible.)
 - **The thumb-down lift.** As the gesture is claimed, the moving tab drops back
   — a small scale, elevation and corner radius, with the page beneath dimming —
   so it reads as a card being pushed aside rather than a page repainting.
