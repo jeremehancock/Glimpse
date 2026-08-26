@@ -410,12 +410,45 @@ those tags.
       scroll there is still travelling when the animation ends and the page
       drifts to the top a beat later. Measured: still at 3000px two frames in,
       settling at 12px rather than 0.
-- **The tab swipe slides both grids, and every part of that is measured.** The
-  outgoing tab is frozen with `position: fixed` at `-scrollY` so it leaves the
-  scroller; the page is then set to 0 in the one frame nothing on screen
-  reflects it. That is what makes it one movement rather than a jump followed by
-  a slide — both tabs share one document scroll, so there is no other way to
-  show the incoming tab's top while the outgoing shows where the viewer was.
+- **The tab swipe is a drag, and every part of it is measured.** The tabs follow
+  the thumb — both 1:1, a full viewport apart — and the release commits,
+  abandons, or springs back from a resisted end. **Both** tabs are frozen with `position: fixed` so they leave the
+  scroller; the outgoing one at `-scrollY`, the incoming one at 0. The page is
+  then set to 0 in the one frame nothing on screen reflects it. That is what
+  makes it one movement rather than a jump followed by a slide — both tabs share
+  one document scroll, so there is no other way to show the incoming tab's top
+  while the outgoing shows where the viewer was.
+  - **The tabs are EDGE TO EDGE, never overlapping, and that is a correctness
+    decision rather than a look.** A parallax lag was built first — the incoming
+    tab a third of a viewport out, at a third of the speed — because that is
+    what the platform does. At that distance the two grids overlap for the whole
+    gesture, and both carry the same `z-index` (they need it to clear the drag
+    scrim), so paint order fell back to **document order**: `#tvshows-content`
+    is second in the markup, so TV Shows painted over Movies *in both
+    directions*. It reached the user as "the TV show grid is always on top".
+    A full viewport apart, the question cannot arise. There is no ratio token —
+    pinned at 1 it would be a knob that does nothing. The lift's `scale(0.94)`
+    supplies the layered quality instead: it makes each tab ~23px narrower than
+    the viewport, so a gap opens between them.
+  - **Freezing BOTH is what makes the gesture abandonable.** The earlier version
+    froze only the outgoing tab and reset the page immediately, which is fine for
+    a transition that always completes. A drag can be let go of, and a page
+    already at 0 has discarded the offset it must return to. The abandon path
+    restores it in `endTabTransition()`, after un-pinning, in the same
+    synchronous block — un-pinning first puts the page at the top of the library,
+    so a paint between the two shows the viewer row 0 for a frame.
+  - **The setup cost is the RENDER, not the library.** This was measured wrong
+    once and the wrong model survived into a design. Filter and sort over 7,000
+    items is 16.9ms; `displayMedia()` is 147.9ms and costs the same at 1,200
+    items. So the lever is not rendering at all: each grid view carries a
+    `renderSignature()` — tab, search, genre, sort, length — and the render is
+    skipped when it still matches. **175.3ms → 1.4ms.** The inactive tab is
+    re-warmed at idle whenever the selection changes so that skip actually hits.
+    - The signature is `JSON.stringify`, not a delimiter join. Search term and
+      genre both admit spaces, so `"a b"`/`"c"` and `"a"`/`"b c"` join
+      identically — a collision in the one direction this must never be wrong
+      in. A false "stale" costs a render; a false "current" shows the viewer the
+      other selection's grid, which is this project's oldest failure.
   - **The freeze reads NO geometry.** Setting the frozen styles costs 0.2–0.4ms;
     a single `getBoundingClientRect()` afterwards costs **77.7ms**, landing on
     the animation's first frame. `tests/test_tab_transition.py` bans the whole
@@ -434,19 +467,88 @@ those tags.
   - **A tab arriving on a slide does not also stagger its cards.** The entrance
     fade softens a grid appearing *in place*; a tab crossing the viewport is
     already a soft arrival, and the stagger was the largest cost on that frame.
-  - **Horizontal translate only.** `firstVisibleRow()` reads
+  - **Horizontal translate only — and the lift's `scale` is the ONE exception,
+    which costs TWO safeguards, not one.** `firstVisibleRow()` reads
     `getBoundingClientRect().top`, so a `translateY` or a scale re-windows the
-    grid mid-flight against a position the viewer never occupied — an
-    off-by-one in the window, not a layout bug.
-  - **The animation is gated on `isMobile`, the gesture's own flag — never a
-    media query.** Same pairing rule as the affordances: two conditions
-    describing one capability drift, and this repo has already shipped a pair
-    that reached 992px and 768px independently.
+    grid mid-flight against a position the viewer never occupied.
+    1. `updateGridWindow()` **refuses outright** while a gesture is live. Do not
+       substitute the fact that a pinned tab receives no scroll events — that is
+       a consequence of the freeze, not a property of the lift.
+    2. **`transform-origin` must be the viewport centre in the element's own
+       coordinates**, set per gesture by `pinTab()`. This one shipped to a user.
+       The default origin is the element's own centre, and a tab holding 7,000
+       items is 1,227,442px tall — so scaling by 0.94 about a point ~600,000px
+       below the screen threw the first card **+36,791px** downward. The grid
+       left the screen the instant a thumb touched it.
+    - **The second symptom is the lesson.** The displacement scales with library
+      size, so the 7,000-item tab vanished while the 1,200-item one barely
+      moved, and it reported as *"it always shows the TV Shows grid whichever
+      way I swipe"* — a routing bug that did not exist. One cause, two
+      symptoms, and the plausible one was wrong.
+    - **A moved rect is an arithmetic hazard AND a visible one.** Guard 1 was
+      in place and correct and did nothing for this. Reasoning about a transform
+      only in terms of what it does to the *maths* is how the far larger problem
+      — what it does to the *picture* — went unconsidered.
+  - **The pinned tabs are offset by `contentTop`, never by `-scrollY` alone.**
+    `.content` starts below the header, and the header shrinks on scroll so it
+    is not a constant to hardcode. `beginTabTransition()` therefore takes one
+    `getBoundingClientRect()` — **before any write in that function**, against
+    layout the browser already computed, which is free. The ~78ms rule is *never
+    measure what you just invalidated*, not *never measure*; the test enforces
+    the ordering rather than banning the call.
+  - **The axis locks at 8px, and that is not the commit distance.** They were one
+    number and that is why nothing could move until the finger lifted: the old
+    handler claimed the gesture only after 100px. Nothing can move before the
+    claim, and on iOS a sequence whose early moves went uncancelled has already
+    gone to the scroller, where later `preventDefault()` is ignored. The
+    `touchmove` listener is non-passive **from the start** for the same reason.
+    Commit is a third of the viewport **or** a flick, read from the last ~100ms
+    rather than the gesture's average, and it is never latched — out past the
+    threshold and back is an abandon.
+  - **A drag is refused at `touchstart`, and it asks the overlay system.** A
+    discrete gesture could check at the end because nothing had moved; a drag
+    that discovers the conflict later has already pinned two tabs. It calls
+    `window.GlimpseOverlays.anyOverlayOpen()` rather than naming overlay keys —
+    a name list is a registry by another route, and the DOM-keyed rule at the
+    top of `overlays.js` is exactly what it exists to avoid.
+  - **`touchcancel` is bound, and it matters more than it did.** An incoming call
+    mid-drag must not leave two tabs pinned and the grid refusing to re-window:
+    that is a page that will not scroll, with nothing on screen to explain it.
+  - **The drag is gated on `isMobile`, the gesture's own flag — never a media
+    query.** Same pairing rule as the affordances: two conditions describing one
+    capability drift, and this repo has already shipped a pair that reached 992px
+    and 768px independently.
+  - **The lift is a SCALE AND A SCRIM.** A drop shadow and a corner radius were
+    both built and both removed, for one reason that is the first fact to hold
+    about these panels: they are as tall as the whole library and pinned at the
+    captured offset, so only one viewport of each is ever on screen and neither
+    end of them is. A `box-shadow` therefore renders only as a blurred band down
+    each vertical edge, tracking the thumb — and with the tabs 24px apart, two
+    of those bands land in the gap together. It shipped, and read as noise. A
+    radius renders nothing whatsoever. That the panel is *enormous* is the same
+    fact behind the transform-origin bug above: with these tabs, their height is
+    the first thing to reason from, not the last.
+  - **The first-load swipe tip stays.** It was removed on the argument that a
+    drag demonstrates itself; it only demonstrates itself to someone who already
+    tries it, and the gesture has no visible affordance at rest. What is gone is
+    the *post-commit* toast naming the tab arrived at — the motion says that,
+    and says the direction too.
   - **`transform !== 'none'` does not prove a transition ran.** It is satisfied
     by the *start* value, so it passes for a slide that never moves — and it
     did, in the first version of this verification. Movement does not begin
     until ~85ms after the class lands. Sample the path across frames, not a
-    point.
+    point. **For a drag the bar is higher still:** the proof is that the
+    transform *corresponds to the finger*, because a handler writing a constant
+    offset on the first move passes any single-point check ever written. Drive
+    a known path with `Browser.drag()` and assert against each coordinate,
+    including a reversal.
+  - **Do not measure a gesture with a harness that runs inside the frames it is
+    timing.** Dispatching synthetic `TouchEvent`s from the rAF callback that
+    records frame gaps reported a 33.4ms median; the real CDP input path on the
+    same build reports 16.7ms. It is the forced-layout trap in another costume.
+    And always run a control at the same dispatch rate with the gesture *not*
+    claimed — over CDP the driver's blocking round-trips drop as many frames as
+    the drag does, so without one the tail cannot be attributed to anything.
 - Python: `pathlib` over `os.path`, type hints on anything crossing a module
   boundary, and `print()` is the fetchers' interface — `docker logs` is how a
   user watches an import run. Don't replace it with a logger that hides output.

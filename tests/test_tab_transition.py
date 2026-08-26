@@ -89,26 +89,56 @@ def css_rule(source: str, selector: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def test_the_freeze_reads_no_geometry(index):
-    """Taking the outgoing tab out of flow is free; measuring it afterwards is not.
+PROBES = (
+    'getBoundingClientRect',
+    'offsetHeight',
+    'offsetTop',
+    'offsetWidth',
+    'getComputedStyle',
+)
 
-    Setting the frozen styles costs 0.2-0.4ms. A single getBoundingClientRect()
-    after doing so costs 77.7ms -- a forced synchronous layout landing on the
-    animation's opening frame. The transform itself is free, so the hitch reads
-    as "the slide is janky" and the transform takes the blame.
+
+def test_the_setup_measures_only_before_it_writes(index):
+    """The rule is not "never measure" -- it is "never measure what you invalidated".
+
+    Setting the frozen styles costs 0.2-0.4ms. A getBoundingClientRect() AFTER
+    doing so costs 77.7ms, a forced synchronous re-layout landing on the
+    gesture's opening frame. A read taken before any write in the same function
+    is against layout the browser already computed for the last frame, and costs
+    nothing.
+
+    The setup genuinely needs one measurement -- the tab's offset below the
+    header, which is not a constant because the header shrinks on scroll -- so
+    banning the call outright was wrong. Banning it after the first write is the
+    real constraint.
     """
-    body = function_body(index, 'switchTabAnimated')
-    for probe in (
-        'getBoundingClientRect',
-        'offsetHeight',
-        'offsetTop',
-        'offsetWidth',
-        'getComputedStyle',
-    ):
+    for name in ('beginTabTransition', 'beginResistedDrag'):
+        body = function_body(index, name)
+        writes = [
+            body.index(w) for w in ('classList.add', '.style.top', 'setProperty') if w in body
+        ]
+        assert writes, f'{name}() writes nothing -- it cannot be freezing anything'
+        first_write = min(writes)
+        for probe in PROBES:
+            position = body.find(probe)
+            if position == -1:
+                continue
+            assert position < first_write, (
+                f'{name}() calls {probe} AFTER it has written a style -- a forced '
+                f'layout there costs ~78ms on the first frame of every swipe'
+            )
+
+
+def test_the_tracker_measures_nothing_at_all(index):
+    """Per frame, sixty times a second, there is no safe moment to measure.
+
+    Everything the tracker needs was captured at lock: the origin, the width,
+    the scroll offset.
+    """
+    body = function_body(index, 'trackTabDrag')
+    for probe in PROBES:
         assert probe not in body, (
-            f'switchTabAnimated() calls {probe} -- a forced layout between the '
-            f'freeze and the transform costs ~78ms on the first frame of every '
-            f'swipe'
+            f'the tracker calls {probe} -- it would force a layout on every frame of the drag'
         )
 
 
@@ -118,7 +148,7 @@ def test_the_scroll_position_is_read_before_anything_is_written(index):
     Reading it after the tab is out of flow reads the collapsed document, and
     the frozen tab renders somewhere the viewer never was.
     """
-    body = function_body(index, 'switchTabAnimated')
+    body = function_body(index, 'beginTabTransition')
     read = body.index('window.scrollY')
     for write in ('applyTabState(', 'classList.add', 'filterAndSortMedia('):
         assert read < body.index(write), (
@@ -140,9 +170,9 @@ def test_the_incoming_tab_is_rendered_before_it_is_shown(index):
     the incoming tab before its render lands therefore does not show blank rows
     on the first switch; it shows a spinner.
     """
-    body = function_body(index, 'switchTabAnimated')
+    body = function_body(index, 'beginTabTransition')
     render = body.index('filterAndSortMedia(')
-    reveal = body.index("classList.add('tab-entering')")
+    reveal = body.index("classList.add('tab-entering'")
     assert render < reveal, (
         'the incoming tab is revealed before it is rendered -- the first switch '
         'to a tab would show its loading spinner'
@@ -175,9 +205,9 @@ def test_a_tab_arriving_on_a_slide_does_not_also_stagger_its_cards(index):
     transitions and 120 rAF closures, doubled on a tab's first render because an
     unmeasured row pitch makes displayMedia() render twice.
     """
-    body = function_body(index, 'switchTabAnimated')
+    body = function_body(index, 'beginTabTransition')
     match = re.search(r'filterAndSortMedia\(([^)]*)\)', body)
-    assert match, 'switchTabAnimated() does not render the incoming tab'
+    assert match, 'beginTabTransition() does not render the incoming tab'
     assert 'false' in match.group(1), (
         'the sliding tab still animates its cards in; that is redundant under a '
         'slide and is the largest cost on the opening frame'
@@ -189,21 +219,50 @@ def test_a_tab_arriving_on_a_slide_does_not_also_stagger_its_cards(index):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize('selector', ('.content.tab-leaving', '.content.tab-entering'))
-def test_the_transition_translates_horizontally_only(index, selector):
+def test_the_transition_translates_horizontally_only(index):
     """firstVisibleRow() derives the grid's window from getBoundingClientRect().top.
 
-    A translateY or a scale moves that top while the transition runs, so a
-    scroll mid-flight re-windows the grid against a position the viewer never
-    occupied. It presents as an off-by-one in the window, not as a layout bug.
+    A translateY moves that top while the transition runs, so a scroll mid-flight
+    re-windows the grid against a position the viewer never occupied. It presents
+    as an off-by-one in the window, not as a layout bug.
+
+    The lift's scale is the one exception and it is checked separately below --
+    it moves that top exactly as a translateY would, and is admissible only
+    because the windowing refuses outright for the gesture's duration.
     """
-    rule = css_rule(index, selector)
-    assert 'translateX(' in rule, f'{selector} does not translate horizontally'
-    for banned in ('translateY(', 'scale(', 'translate3d(', 'rotate('):
+    rule = css_rule(index, '.content.tab-leaving,\n        .content.tab-entering')
+    assert 'translateX(' in rule, 'the tabs do not translate horizontally'
+    for banned in ('translateY(', 'translate3d(', 'rotate(', 'skew('):
         assert banned not in rule, (
-            f'{selector} uses {banned} -- a vertical or scaling transform '
-            f'corrupts the grid window arithmetic mid-transition'
+            f'the tab transform uses {banned} -- a vertical transform corrupts '
+            f'the grid window arithmetic mid-transition'
         )
+
+
+def test_the_lift_is_paired_with_a_windowing_refusal(index):
+    """The scale and the guard arrive together or neither does.
+
+    A scale moves every card's getBoundingClientRect().top, which is
+    firstVisibleRow()'s only input. It is admissible ONLY because
+    updateGridWindow() refuses while a gesture is live.
+
+    This asserts the pairing rather than either half, because either half alone
+    is the defect: a scale without the guard re-windows the grid against a
+    position the viewer never occupied, and this repo has already shipped two
+    conditions meant to describe one capability that drifted apart.
+    """
+    rule = css_rule(index, '.content.tab-leaving,\n        .content.tab-entering')
+    if 'scale(' not in rule:
+        return  # No lift, no guard needed.
+
+    body = function_body(index, 'updateGridWindow')
+    assert re.search(r'if\s*\(tabGestureActive\(\)\)\s*return', body), (
+        'the tabs scale during a gesture but updateGridWindow() does not refuse '
+        'while one is live -- the window would be computed against a scaled rect'
+    )
+    assert body.index('tabGestureActive()') < body.index('rowPitch'), (
+        'the windowing guard runs after the geometry checks rather than first'
+    )
 
 
 def test_layer_promotion_is_declared_on_the_setup_state_not_the_slide(index):
@@ -212,10 +271,10 @@ def test_layer_promotion_is_declared_on_the_setup_state_not_the_slide(index):
     Declared on the frozen and parked states instead, the layer is promoted
     during the setup frame. Measured at 83ms of a 280ms slide when it was not.
     """
-    for selector in ('.content.tab-leaving', '.content.tab-entering'):
-        assert 'will-change' in css_rule(index, selector), (
-            f'{selector} does not promote its layer during setup'
-        )
+    setup = css_rule(index, '.content.tab-leaving,\n        .content.tab-entering')
+    assert 'will-change' in setup, (
+        'the frozen and parked states do not promote their layer during setup'
+    )
     assert 'will-change' not in css_rule(index, '.content.tab-sliding'), (
         'will-change is declared on the sliding state, so the layer is promoted '
         'on the first frame of the transform -- the one that can least afford it'
@@ -292,13 +351,13 @@ def test_teardown_does_not_depend_on_transitionend_alone(index):
     transition, so the event still fires there -- this covers the cases where it
     does not, including a second swipe landing mid-flight.
     """
-    body = function_body(index, 'switchTabAnimated')
-    assert 'setTimeout(endTabTransition' in body, (
+    assert 'setTimeout(endTabTransition' in function_body(index, 'commitTabState'), (
         'the teardown has no fallback timer; a dropped transitionend leaves a '
         'tab pinned and transformed'
     )
-    assert body.index('endTabTransition()') < body.index('window.scrollY'), (
-        'switchTabAnimated() does not resolve a transition already in flight '
+    setup = function_body(index, 'beginTabTransition')
+    assert setup.index('endTabTransition()') < setup.index('window.scrollY'), (
+        'beginTabTransition() does not resolve a transition already in flight '
         'before starting another'
     )
 
@@ -335,7 +394,7 @@ def test_the_duration_lives_in_tokens_and_is_read_back(index, tokens):
     """Chrome never restates a number the token file owns."""
     assert '--dur-tab:' in tokens, 'tokens.css does not declare --dur-tab'
     assert 'var(--dur-tab)' in index, 'the transition does not read its duration from the token'
-    assert "getPropertyValue('--dur-tab')" in index, (
+    assert re.search(r"readToken\('--dur-tab'", index), (
         'the safety timer restates the duration instead of reading the token'
     )
 
@@ -348,11 +407,436 @@ def test_the_transition_scrolls_instantly(index, overlays_js):
     Measured before this was fixed: still at 3000px two frames in, settling at
     12px rather than 0.
     """
-    body = function_body(index, 'switchTabAnimated')
+    body = function_body(index, 'beginTabTransition')
     assert re.search(r"scrollPageTo\(0,\s*'instant'\)", body), (
         'the transition does not scroll instantly; a smooth scroll outlives the '
         'slide and the page drifts to the top after it ends'
     )
     assert re.search(r'function scrollPageTo\(y, behavior = ', overlays_js), (
         'scrollPageTo() does not accept a behavior, so every caller is smooth'
+    )
+
+
+# ---------------------------------------------------------------------------
+# The drag
+#
+# The gesture IS the transition now. These pin the decisions whose reversal
+# reintroduces a defect that was actually hit building it -- and, as above,
+# they pin SOURCE decisions. A drag cannot be observed without a browser, and
+# the behavioural half is `tools/browser.py` driving Chromium over CDP with
+# `Input.dispatchTouchEvent`, sampling the transform across the touch path.
+#
+# What that browser check must assert, because the obvious version does not:
+# a drag's proof is that the transform CORRESPONDS to the finger, not that it
+# changed. A handler setting a constant offset on the first move passes any
+# single-point check ever written -- and `transform !== 'none'` passes for a
+# slide that never moves, which it did here once already.
+# ---------------------------------------------------------------------------
+
+
+def test_the_axis_locks_before_the_gesture_is_claimed(index):
+    """preventDefault() has to be available on the first move that crosses it.
+
+    The old handler claimed the gesture only after 100px of horizontal travel.
+    That is far too late to drive a drag -- nothing can move until the gesture is
+    claimed -- and on iOS a touch whose early moves went uncancelled has already
+    been given to the scroller, where later preventDefault() calls are ignored.
+    """
+    assert 'TAB_AXIS_LOCK_PX' in index, 'there is no axis-lock distance'
+    lock = re.search(r'const TAB_AXIS_LOCK_PX = (\d+)', index)
+    assert lock, 'the axis-lock distance is not a named constant'
+    assert int(lock.group(1)) <= 20, (
+        'the axis locks too late to precede a scroll; the browser will have '
+        'taken the touch before the gesture claims it'
+    )
+
+    commit = re.search(r'const TAB_COMMIT_FRACTION = ([^;]+);', index)
+    assert commit, 'there is no commit distance'
+    assert 'TAB_AXIS_LOCK_PX' not in commit.group(1), (
+        'the lock distance and the commit distance are the same number -- they '
+        'answer different questions and the old handler conflating them is why '
+        'nothing could move until the finger lifted'
+    )
+
+
+def test_the_touch_listener_is_not_passive(index):
+    """A passive listener cannot call preventDefault() at all.
+
+    Registered passive, the gesture works everywhere except the platform it was
+    written for: iOS hands an uncancelled sequence to the scroller and ignores
+    every later attempt to take it back.
+    """
+    move = re.search(
+        r"addEventListener\('touchmove',(.*?)\{\s*passive:\s*(\w+)\s*\}",
+        index,
+        flags=re.S,
+    )
+    assert move, 'no touchmove listener found'
+    assert move.group(2) == 'false', (
+        'the touchmove listener is passive, so it cannot preventDefault() and '
+        'the page scrolls out from under the drag'
+    )
+
+
+def test_the_axis_is_decided_once_and_held(index):
+    """A gesture that re-arbitrates can hand a moving page back to the scroller."""
+    body = re.search(
+        r"addEventListener\('touchmove'.*?\}, \{ passive: false \}\)",
+        index,
+        flags=re.S,
+    )
+    assert body, 'no touchmove listener found'
+    assert re.search(r"if\s*\(axis === 'y'.*?\)\s*return", body.group(0)), (
+        'the touchmove handler does not bail out for a touch already assigned '
+        'to the scroller, so a vertical scroll can still be stolen mid-gesture'
+    )
+
+
+def test_the_drag_is_refused_at_touchstart_not_at_release(index):
+    """A drag that discovers the conflict late has already moved two tabs.
+
+    The old handler checked at touchend, which is enough when nothing has moved.
+    By the time a drag could abort it has suppressed the browser's handling and
+    taken both tabs out of the scroller.
+    """
+    start = re.search(
+        r"addEventListener\('touchstart'(.*?)\}, \{ passive: true \}\)",
+        index,
+        flags=re.S,
+    )
+    assert start, 'no touchstart listener found'
+    assert 'gestureRefused' in start.group(1), (
+        'the drag is not refused at touchstart; an overlay conflict would be '
+        'discovered only after the tabs had been pinned and moved'
+    )
+
+
+def test_the_overlay_check_is_not_a_registry(index, overlays_js):
+    """A list of overlay names has to be updated when an overlay is added.
+
+    Forgetting is silent: the new overlay opens, and a swipe across it drags the
+    library behind it. The overlay system already answers this question by
+    scanning the DOM, so the drag asks it rather than keeping its own list.
+    """
+    assert 'GlimpseOverlays.anyOverlayOpen' in overlays_js, (
+        'overlays.js does not export anyOverlayOpen(), so index.html has to '
+        'reimplement it -- which means a registry'
+    )
+    body = function_body(index, 'gestureRefused')
+    assert 'GlimpseOverlays.anyOverlayOpen()' in body, (
+        'the drag does not use the overlay system to decide whether one is open'
+    )
+    for name in ('detailOpen', 'menuOpen', 'genreOpen', 'trailerOpen', 'rouletteOpen'):
+        assert name not in body, (
+            f'the refusal names {name} -- a registry by another route, and an '
+            f'overlay added later inherits nothing'
+        )
+
+
+def test_touchcancel_resolves_the_drag(index):
+    """A system gesture ends the touch without a touchend.
+
+    Without this the tabs stay pinned out of the scroller and the grid stays
+    refusing to re-window: a page that will not scroll, with nothing on screen
+    to explain it.
+    """
+    assert re.search(r"addEventListener\('touchcancel'", index), (
+        'touchcancel is not bound; an interrupted drag strands both tabs pinned'
+    )
+    cancel = re.search(
+        r"addEventListener\('touchcancel'(.*?)\}, \{ passive: true \}\)",
+        index,
+        flags=re.S,
+    )
+    assert 'settleTabDrag()' in cancel.group(1), (
+        'touchcancel does not route to the same resolution as a release'
+    )
+
+
+def test_the_tracker_writes_once_per_frame(index):
+    """touchmove fires at the digitiser's rate, not the frame rate.
+
+    On a 120Hz panel that is two style writes per frame, the second discarding
+    the first, on the frames that can least afford it.
+    """
+    body = function_body(index, 'trackTabDrag')
+    assert 'requestAnimationFrame' in body, 'the tracker does not coalesce to a frame'
+    assert re.search(r'if\s*\(record\.frame !== null\)\s*return', body), (
+        'the tracker schedules a frame per move rather than coalescing them'
+    )
+
+
+def test_a_drag_is_never_latched(index):
+    """A drag past the threshold that comes back is an abandon.
+
+    Latching would mean the tabs keep following a finger whose gesture has
+    already been decided, which is the thing this change removes.
+    """
+    body = function_body(index, 'dragCommits')
+    assert 'drag.offset' in body, (
+        "the commit test does not read the drag's CURRENT offset, so it cannot "
+        'tell a drag that came back from one that did not'
+    )
+    assert 'latch' not in index.lower(), 'something latches the commit decision'
+
+
+def test_the_settle_is_timed_from_the_distance_remaining(index, tokens):
+    """A fixed duration is wrong at both ends.
+
+    A tab released at 95% of its travel spends the full time crossing the last
+    sliver; one released at 5% covers nearly the whole viewport in it.
+    """
+    assert '--dur-tab-settle-min:' in tokens, 'tokens.css does not declare a floor for the settle'
+    body = function_body(index, 'settleDuration')
+    assert 'TAB_TRANSITION_MS' in body and 'TAB_SETTLE_MIN_MS' in body, (
+        'the settle is not bounded by both the tab duration and the floor'
+    )
+    assert 'var(--dur-tab-settling, var(--dur-tab))' in index, (
+        'the sliding rule does not fall back to --dur-tab, so a slide from rest '
+        'has no duration at all'
+    )
+
+
+def test_the_drag_numbers_live_in_tokens(index, tokens):
+    """Two files must agree about the lift, so one of them owns it."""
+    for token in ('--tab-drag-lift:', '--tab-drag-scrim:', '--dur-tab-settle-min:'):
+        assert token in tokens, f'tokens.css does not declare {token}'
+    assert "readToken('--tab-drag-lift'" in index, (
+        'index.html restates the lift instead of reading it from the token'
+    )
+
+
+def test_the_tabs_move_edge_to_edge_and_never_overlap(index, tokens):
+    """This one reached the user too, and the symptom named the wrong thing.
+
+    The incoming tab used to park a third of a viewport out and travel at a
+    third of the finger's speed -- the iOS parallax. At that distance the two
+    grids overlap for the entire gesture, and since both carry the same z-index
+    the winner is decided by document order: `#tvshows-content` is second, so
+    TV Shows painted over Movies in BOTH directions. It was reported as "the TV
+    show grid is always on top", which is exactly what it was, and which sounds
+    like a routing or z-index bug rather than a geometry one.
+
+    Edge to edge the question cannot arise. A ratio pinned at 1 would be a knob
+    that does nothing, so there must not be one.
+    """
+    assert '--tab-drag-parallax' not in tokens, (
+        'the parallax ratio is back in tokens.css -- at anything below 1 the '
+        'tabs overlap and document order decides which is visible'
+    )
+    assert 'TAB_PARALLAX' not in index, 'the parallax ratio is back in index.html'
+
+    park = function_body(index, 'parkOffset')
+    assert re.search(r'\*\s*width\s*;', park), (
+        'the incoming tab does not park a FULL viewport out, so it overlaps the '
+        'outgoing one for the whole drag'
+    )
+
+    tracker = function_body(index, 'trackTabDrag')
+    assert re.search(r'park \+ drag\.offset\}px', tracker), (
+        'the incoming tab travels at a different rate from the outgoing one, so '
+        'the gap between them changes during the drag and they overlap'
+    )
+
+
+def test_the_lift_is_a_scale_and_a_scrim_only(index, tokens):
+    """Both other ingredients of a "raised card" were tried here and removed.
+
+    One reason covers both, and it is the first fact about these panels: they are
+    as tall as the whole library, so only one viewport of each is ever on screen
+    and neither end of them is.
+
+    A box-shadow therefore renders only as a blurred band down each vertical
+    edge -- top and bottom are far off screen -- and with the tabs 24px apart,
+    two of those bands sit in the gap at once. Reported as distracting, which is
+    what it was: noise tracking the thumb. A border-radius renders nothing at
+    all, and would additionally need `overflow: hidden` to clip cards to it.
+
+    The scale does the visible work: it makes each tab narrower than the
+    viewport, which is what opens the gap between them.
+    """
+    for gone in ('--tab-drag-elevation', 'box-shadow: var(--tab-drag'):
+        assert gone not in index and gone not in tokens, (
+            f'{gone} is back -- on a panel 1,227,442px tall a shadow is a band '
+            f'down each edge following the thumb, and two of them land in the '
+            f'gap between the tabs'
+        )
+    assert 'tab-lifted' not in index, (
+        'the .tab-lifted class is back but the lift is a scale and a scrim; an '
+        'empty class is a hook for exactly the declarations that were removed'
+    )
+    assert '--tab-drag-lift:' in tokens, 'the lift scale token is gone'
+    assert '--tab-drag-scrim:' in tokens, 'the scrim token is gone'
+
+
+def test_the_drag_is_gated_with_the_gesture_not_a_breakpoint(index):
+    """One condition cannot drift from itself.
+
+    This project has already shipped a hide-control rule and its show-the-
+    replacement rule as separate media queries that reached 992px and 768px
+    independently, leaving every width between them with neither.
+    """
+    assert re.search(r'const isMobile = .*?innerWidth < 768', index), (
+        'the gesture flag is gone or changed shape'
+    )
+    for handler in ('touchstart', 'touchmove', 'touchend', 'touchcancel'):
+        assert f"addEventListener('{handler}'" in index, f'{handler} is not bound'
+    binding = index.index("addEventListener('touchstart'")
+    gate = index.index('if (isMobile) {')
+    assert gate < binding, (
+        'the touch listeners are bound outside the isMobile gate, so a width '
+        'could drag without the animation being enabled'
+    )
+
+
+def test_teardown_clears_everything_the_drag_sets(index):
+    """Enumerated, so a setup line without a teardown line is visible here.
+
+    A drag takes two tabs out of the scroller and stops the grid re-windowing.
+    Leaving that in place because a touch was cancelled gives the viewer a page
+    that cannot scroll and a grid that cannot render new rows, with nothing on
+    screen to explain it.
+    """
+    body = function_body(index, 'endTabTransition')
+    for cls in ('tab-leaving', 'tab-entering', 'tab-pinned', 'tab-sliding'):
+        assert cls in body, f'the teardown does not clear {cls}'
+    for prop in ('--tab-shift', '--tab-lift', '--dur-tab-settling', 'top'):
+        assert prop in body, f'the teardown does not clear {prop}'
+    for root in ('tab-transitioning', 'tab-dragging'):
+        assert root in body, f'the teardown does not clear {root} from the root'
+    assert 'cancelAnimationFrame' in body, (
+        "the teardown leaves the tracker's pending frame scheduled, so one more "
+        'write lands after everything it writes to has been cleared'
+    )
+
+
+def test_an_abandoned_drag_restores_the_scroll_after_unpinning(index):
+    """Order is the whole of it.
+
+    Un-pinning restores the document's full height with the page at the top of
+    the library; the scroll must follow in the same synchronous block, with no
+    paint between, or the viewer sees one frame at row 0.
+    """
+    body = function_body(index, 'endTabTransition')
+    unpin = body.index('classList.remove(')
+    restore = body.index('scrollPageTo(restoreY')
+    assert unpin < restore, (
+        'the scroll is restored before the tabs are un-pinned, so it is clamped '
+        'against the collapsed document and lands at 0'
+    )
+    assert re.search(r"scrollPageTo\(restoreY,\s*'instant'\)", body), (
+        'the restore is smooth, so an abandoned drag animates a correction that '
+        'is supposed to be invisible'
+    )
+
+
+def test_a_scaled_tab_anchors_its_origin_to_the_viewport(index):
+    """THIS ONE SHIPPED. It reached the user and it was not subtle.
+
+    `transform-origin` defaults to the element's own centre. A tab holding 7,000
+    items is 1,227,442px tall, so its centre is ~600,000px below the screen, and
+    scaling by 0.94 about a point that far away moves its top edge down by
+    height x 0.03. Measured on the build that shipped to :dev, the first card
+    jumped +36,791px the instant a thumb touched it -- the grid left the screen
+    downward.
+
+    The second symptom is what makes this worth a test rather than a comment.
+    The displacement is proportional to LIBRARY SIZE, so the 7,000-item tab
+    vanished while the 1,200-item one barely moved, and it presented as "it
+    always shows the TV Shows grid whichever way I swipe" -- a routing bug that
+    did not exist. Two reports, one cause, and the plausible one was wrong.
+
+    Nothing in the source pinned this. The windowing guard was in place and
+    correct, and it addressed the arithmetic hazard of a moved rect while the
+    VISIBLE hazard went unconsidered.
+    """
+    rule = css_rule(index, '.content.tab-leaving,\n        .content.tab-entering')
+    if 'scale(' not in rule:
+        return  # No scale, no origin to get wrong.
+
+    assert 'transform-origin' in rule, (
+        'the tabs are scaled with no transform-origin, so the scale is about '
+        'the element centre -- hundreds of thousands of pixels below the '
+        'viewport at library scale. The grid drops off the bottom of the screen.'
+    )
+    assert '--tab-origin-y' in rule, (
+        'the transform-origin is a constant; it has to be computed per gesture '
+        'from where the pinned tab actually sits on screen'
+    )
+
+    body = function_body(index, 'pinTab')
+    assert '--tab-origin-y' in body and 'style.top' in body, (
+        'pinTab() does not set both the offset and the origin -- they are one '
+        'decision and a tab pinned without its origin is the shipped bug'
+    )
+
+
+def test_a_pinned_tab_is_offset_by_its_own_position_not_zero(index):
+    """`.content` starts below the header, and the header is not a constant.
+
+    Pinning at `-scrollY` puts the grid that far too high, tucked under the
+    header. The offset has to come from where the tab actually is.
+    """
+    body = function_body(index, 'beginTabTransition')
+    assert 'contentTop' in body, "the freeze does not account for the tab's offset below the header"
+    assert re.search(r'pinTab\(\s*outgoing,\s*contentTop - y', body), (
+        'the outgoing tab is not pinned at its own position minus the scroll'
+    )
+    assert re.search(r'pinTab\(\s*incoming,\s*contentTop', body), (
+        'the incoming tab is not pinned at its own position, so it renders '
+        'under the header instead of below it'
+    )
+
+
+def test_the_first_load_swipe_tip_is_present(index):
+    """It teaches a gesture that has no visible affordance at rest.
+
+    Removed once on the reasoning that a drag demonstrates itself. It only
+    demonstrates itself to someone who already tries it, which is not
+    discoverability. The user asked for it back.
+
+    What stays gone is the post-commit toast naming the tab arrived at -- the
+    motion states that, and states the direction with it.
+    """
+    assert 'swipe-indicator' in index, 'the swipe tip markup is gone'
+    assert 'Swipe left or right' in index, 'the swipe tip has no text'
+    assert 'Switched to' not in index, (
+        'the post-commit toast is back -- the motion already says which tab '
+        'was arrived at, and in which direction'
+    )
+
+
+def test_a_skipped_render_still_puts_the_window_at_the_top(index):
+    """THIS ONE SHIPPED, and the render signature caused it.
+
+    The signature answers "is the selection unchanged". It says nothing about
+    WHERE the rendered window sits, and the window position is part of what is
+    rendered. Scrolling a tab moves it: at 6,000px the grid was rendering from
+    item 24, standing on a ~4,000px spacer. Swiping back pins that tab at its
+    TOP -- which is where the spacer is.
+
+    Measured on the build that shipped: 0 of 120 rendered cards on screen, and
+    the viewer had to scroll four thousand pixels down to find their library.
+    Reported as "when you swipe back to the previous grid it shows blank until
+    you scroll", which is exactly what it did.
+
+    Every caller that can skip is about to show the tab from its first item, so
+    the window has to be there. Re-windowing is not re-rendering -- ~45ms
+    against ~175ms -- so the skip keeps its value.
+    """
+    body = function_body(index, 'filterAndSortMedia')
+    skip = re.search(
+        r'if \(!animateCards && view\.signature === signature && view\.rendered > 0\) \{(.*?)\}',
+        body,
+        flags=re.S,
+    )
+    assert skip, 'the render skip is gone or has changed shape'
+    assert 'renderWindow' in skip.group(1), (
+        'the skip returns without checking where the rendered window sits, so a '
+        'tab scrolled away from and returned to shows its spacer instead of its '
+        'items -- a blank grid'
+    )
+    assert 'view.first !== 0' in skip.group(1), (
+        'the skip re-windows unconditionally; it should only pay that cost when '
+        'the window is not already at the top'
     )

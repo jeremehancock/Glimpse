@@ -87,6 +87,41 @@ finally:
     browser.close()
 ```
 
+## Driving a touch drag
+
+`Browser.drag()` dispatches a path and samples after every move. Touch emulation
+has to be on, which `viewport()` does below 768px.
+
+```python
+samples = browser.drag(
+    [(330, 400), (300, 400), (240, 400), (300, 400)],  # out, and back
+    """(() => {
+      const m = new DOMMatrixReadOnly(
+        getComputedStyle(document.querySelector('#movies-content')).transform);
+      return { x: m.m41 };
+    })()""",
+)
+```
+
+**Assert against the coordinates, not against "it moved".** A drag's proof is
+that the transform corresponds to the finger. `transform !== 'none'` is
+satisfied by a transition's start value — it has already produced a false pass
+here — and a handler writing a constant offset on the first move passes any
+single-point check ever written. Put a reversal in the path: a handler tracking
+`abs(delta)` follows a finger perfectly in one direction and refuses to come
+back.
+
+**Never time frames from a harness that runs inside them.** Dispatching
+synthetic `TouchEvent`s from the same rAF callback that records frame gaps
+measured a 33.4ms median where the real CDP input path measured 16.7ms — the
+cost of building and dispatching the events was inside the number.
+
+**And always run a control.** Every `browser.touch()` is a blocking websocket
+round-trip that perturbs the main thread. Dispatch the identical sequence at a
+position where the gesture is *not* claimed: on this machine that control drops
+53–67 frames per run on its own, which is the same as the drag. Without it, the
+driver's cost reads as the feature's.
+
 ## Two traps these encode
 
 - **Test at 1280px _and_ 390px.** The overlay system behaves differently at each

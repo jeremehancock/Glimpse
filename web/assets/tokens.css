@@ -91,6 +91,53 @@
     --ease-entrance: cubic-bezier(0, 0, 0.2, 1);
     --ease-exit: cubic-bezier(0.4, 0, 1, 1);
 
+    /* --- The tab drag -------------------------------------------------------
+       A swipe between tabs follows the finger. These are the numbers that
+       describe that gesture, and they are here rather than in index.html for
+       the same reason every other duration is: two files have to agree about
+       them. The CSS draws the lift; the gesture code reads the ratio and the
+       durations back to decide where the tabs go and how long they take to
+       settle.
+
+       THERE IS NO PARALLAX RATIO, and there was one. The incoming tab used to
+       enter at a third of the outgoing tab's speed, parked a third of a viewport
+       out. That is what iOS does, and here it was wrong: at a third of a
+       viewport the two grids OVERLAP for the whole gesture, and which one is on
+       top is then decided by document order rather than by direction — so
+       TV Shows painted over Movies whichever way the thumb went. The tabs move
+       together now, a full viewport apart, edge to edge: one leaves as the other
+       arrives, and neither is ever over the other. A ratio fixed at 1 would be a
+       knob that does nothing, so it is gone rather than set.
+
+       --tab-drag-lift is the scale the moving tab takes at thumb-down. It is
+       admissible only because the grid refuses to re-window while a drag is
+       live — a scale moves every card's measured top, which is the windowing
+       arithmetic's only input. Change one, check the other. It also opens the
+       gap between the two tabs: at 0.94 each is 23px narrower than the viewport,
+       so the pair read as two cards rather than one sliding sheet.
+
+       --dur-tab-settle-min is the floor under a release. The settle's duration
+       scales with the distance still to travel, so a tab released at 95% would
+       otherwise finish in a few milliseconds and read as a snap rather than as
+       the end of a movement. --dur-tab remains the ceiling: a committed swipe
+       that barely moved takes exactly as long as the transition did before this
+       gesture existed.
+
+       THE LIFT IS A SCALE AND A SCRIM, and there is deliberately no elevation
+       token and no radius token. Both were tried and both were removed for the
+       same reason: these panels are as tall as the whole library, so only one
+       viewport of each is ever on screen and neither end of them is.
+
+       A shadow on a panel that tall renders only as a blurred band down each
+       vertical edge — its top and bottom are far off screen — and with the tabs
+       24px apart two of those bands land in that gap together. It read as noise
+       following the thumb. A radius renders nothing whatsoever, for the same
+       geometry. index.html says so at the rule; this is the other half of that
+       note, for whoever comes here to add one. */
+    --tab-drag-lift: 0.94;
+    --tab-drag-scrim: rgba(0, 0, 0, 0.28);
+    --dur-tab-settle-min: 120ms;
+
     /* --- Layering -----------------------------------------------------------
        One ordered scale, not a set of independently chosen numbers.
 

@@ -610,40 +610,149 @@
 
            TRANSLATE ON THE HORIZONTAL AXIS ONLY. `firstVisibleRow()` derives
            the grid's window from `getBoundingClientRect().top`, so a translateY
-           or a scale moves the row arithmetic while the transition runs and a
-           scroll mid-flight re-windows the grid against a position the viewer
-           never occupied. It presents as an off-by-one in the window, not as a
-           layout bug. `--tab-shift` is an X offset and there is no Y equivalent
-           on purpose. */
+           moves the row arithmetic while the transition runs and a scroll
+           mid-flight re-windows the grid against a position the viewer never
+           occupied. It presents as an off-by-one in the window, not as a layout
+           bug. `--tab-shift` is an X offset and there is no Y equivalent on
+           purpose.
+
+           THE LIFT'S SCALE IS THE ONE EXCEPTION, AND IT IS NOT A LOOSENING OF
+           THAT RULE — it is the rule's precondition, stated and enforced. A
+           scale moves every card's measured top exactly as a translateY would.
+           It is admissible only because `updateGridWindow()` refuses outright
+           while a tab gesture is live, so no window can be computed against a
+           transformed rect. That guard and this scale arrive together; remove
+           either and the other is a bug. Do not reach for the fact that a fixed
+           tab receives no scroll events — that is true and it is not the
+           safety, because it stops being true the moment the mechanism changes.
+
+           `--tab-lift` is 1 at rest, so a transition that is not a drag composes
+           to exactly the transform it had before this gesture existed. */
         /* `will-change` is declared on the frozen/parked state rather than on
            `.tab-sliding`, so the compositing layer is promoted during the setup
            frame instead of on the transform's first frame. Declaring it
            alongside the transform costs the promotion exactly where the
            animation can least afford it — measured at 83ms of a 280ms slide. */
-        .content.tab-leaving {
+        .content.tab-leaving,
+        .content.tab-entering {
             display: block;
+            transform: translateX(var(--tab-shift, 0)) scale(var(--tab-lift, 1));
+            /* The viewport's centre in this element's coordinates, set inline by
+               `pinTab()`. NOT the default 50%: these panels are as tall as the
+               library, so their centre is hundreds of thousands of pixels below
+               the screen, and scaling about it throws the grid downward by
+               `height x 0.03` — measured at +36,791px. See `pinTab()`. */
+            transform-origin: 50% var(--tab-origin-y, 50%);
+            will-change: transform;
+        }
+
+        /* Both tabs leave the scroller for a DRAG, and only the outgoing one for
+           a transition from rest.
+
+           A drag can be abandoned. The shipped transition freezes the outgoing
+           tab and immediately sets the page to 0 because the incoming tab is
+           still in flow and has to show its own top — but a page already reset
+           to 0 has thrown away the position an abandoned drag must return to.
+           Pinning the incoming tab as well keeps the document irrelevant for the
+           gesture's duration, so the captured offset stays the only truth about
+           where the viewer was.
+
+           `top` is set inline on the outgoing tab, to the captured scroll offset.
+           The incoming one always sits at 0 — it is showing its own top. */
+        .content.tab-leaving {
             position: fixed;
             left: 0;
             right: 0;
-            /* `top` is set inline to the captured scroll offset. */
-            transform: translateX(var(--tab-shift, 0));
-            will-change: transform;
         }
 
+        .content.tab-entering.tab-pinned {
+            position: fixed;
+            left: 0;
+            right: 0;
+            /* `top` is set inline by `pinTab()`, to the tab's own offset below
+               the header rather than to 0. Pinning at 0 tucks the grid under the
+               header, because that is where `.content` starts in the document
+               and a fixed element does not inherit the container's padding. */
+        }
+
+        /* The lift is a SCALE AND A SCRIM. It has no rule of its own, and both
+           of the properties a "raised card" normally also carries were tried
+           here and removed. The reason is the same one in both cases, and it is
+           the first thing to hold in mind about these panels: they are as tall
+           as the whole library — 1,227,442px at 7,000 items — and pinned at the
+           captured scroll offset, so only one viewport of each is ever on
+           screen and neither end is.
+
+           NO ELEVATION. A `box-shadow` on a panel that tall puts its top and
+           bottom shadows far off screen; all that renders is a blurred band down
+           each vertical edge, tracking the tab as it moves. With the tabs 24px
+           apart, two of those bands sit in that gap at once. It read as visual
+           noise following the thumb, which is what it was.
+
+           NO BORDER RADIUS. Same geometry, and it renders nothing at all: the
+           top corners are off screen except at the very top of the list, the
+           bottom corners are a million pixels below the viewport. It would also
+           require `overflow: hidden` to clip the cards to it — a real
+           containing-block change bought for something almost never visible.
+
+           What remains does the work: the scale (`--tab-lift`, composed into the
+           same `transform` as the offset so the two cannot fight) makes each tab
+           narrower than the viewport, which opens the gap between them, and the
+           scrim below shows the page they have been lifted off. */
+
+        /* The surface behind the lifted tab: what it is lifted OFF.
+
+           A pseudo-element on the root rather than a real node — nothing else
+           needs to know it exists, and it must not live inside either tab.
+
+           It ranks BELOW the tabs and below `--z-chrome`. The header is the
+           app's frame and stays lit; this dims the page the grids sit on, which
+           is what becomes visible in the gap as the outgoing tab moves aside.
+           That gap is the only place a scrim can read during this gesture, and
+           it is enough. */
+        .tab-dragging::after {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background: var(--tab-drag-scrim);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        /* Above the scrim, below the header. Both are needed: a positioned
+           element with `z-index: auto` paints in DOM order, and `html::after`
+           comes after `body`, so without this the scrim would paint over the
+           very tabs it exists to sit behind.
+
+           The two tabs share this value, and that is safe ONLY because they no
+           longer overlap — they sit a full viewport apart. It was not safe when
+           the incoming tab parked a third of a viewport out: equal z-index means
+           document order decides, `#tvshows-content` comes second, and TV Shows
+           therefore painted over Movies in both directions. If anything ever
+           puts these two back on top of each other, this is where the ordering
+           has to become explicit rather than inherited from the markup. */
+        .content.tab-leaving,
         .content.tab-entering {
-            display: block;
-            transform: translateX(var(--tab-shift, 0));
-            will-change: transform;
+            z-index: 1;
         }
 
+        /* Timed per release rather than fixed, because a fixed duration is wrong
+           at both ends: a tab let go at 95% of its travel spends the full 280ms
+           crossing the last sliver, and one let go at 5% covers nearly the whole
+           viewport in the same time. The gesture sets `--dur-tab-settling` from
+           the distance still to go, floored by `--dur-tab-settle-min` and capped
+           at `--dur-tab` — so a commit from rest is indistinguishable from the
+           transition this replaced. */
         .content.tab-sliding {
-            transition: transform var(--dur-tab) var(--ease-standard);
+            transition: transform var(--dur-tab-settling, var(--dur-tab)) var(--ease-standard);
         }
 
-        /* An incoming tab parked at translateX(100%) sits a full viewport past
-           the right edge. Measured at 390px: scrollWidth reaches 750px against a
-           390px clientWidth, so this is a real scrollbar and not a precaution.
-           Scoped to the transition's duration — the class is removed by the same
+        /* An incoming tab parked off screen makes the document wider than the
+           viewport. Measured at 390px with the tab a full viewport out:
+           scrollWidth reached 750px against a 390px clientWidth, so this is a
+           real scrollbar and not a precaution.
+
+           Scoped to the gesture's duration — the class is removed by the same
            teardown that clears the transforms, so containment cannot outlive the
            animation that needs it. */
         .tab-transitioning,
@@ -1324,7 +1433,16 @@
             }
         }
 
-        /* Swipe indicator styles */
+        /* The first-load swipe tip.
+
+           It no longer announces which tab a swipe landed on — the motion says
+           that, and says the direction too. It still TEACHES the gesture on
+           first load, which is the job it was originally added for.
+
+           That half was removed once on the argument that a drag demonstrates
+           itself, and put back: it only demonstrates itself to someone who
+           already tries. Discovering a gesture with no visible affordance is
+           not something to make the viewer guess at. */
         .swipe-indicator {
             display: none;
             position: fixed;
@@ -2403,55 +2521,211 @@
             return typeof isMobile !== 'undefined' && isMobile;
         }
 
-        /* Read from `--dur-tab` rather than restated here, so the stylesheet
-           stays the single source for the number. Only the safety teardown uses
-           it; the transition itself is timed by CSS. */
-        const TAB_TRANSITION_MS = (() => {
+        /* Read from the stylesheet rather than restated here, so `tokens.css`
+           stays the single source for every one of these numbers. */
+        function readToken(name, fallback) {
             const raw = getComputedStyle(document.documentElement)
-                .getPropertyValue('--dur-tab').trim();
-            const ms = raw.endsWith('ms') ? parseFloat(raw)
+                .getPropertyValue(name).trim();
+            const value = raw.endsWith('ms') ? parseFloat(raw)
                 : raw.endsWith('s') ? parseFloat(raw) * 1000
-                : NaN;
-            return Number.isFinite(ms) ? ms : 280;
-        })();
+                : parseFloat(raw);
+            return Number.isFinite(value) ? value : fallback;
+        }
 
-        /* Set by the animated path so its teardown can be run again by whatever
-           interrupts it. An animation is presentation; the tab state it leaves
-           behind is correctness, and that must not depend on a `transitionend`
+        const TAB_TRANSITION_MS = readToken('--dur-tab', 280);
+        const TAB_SETTLE_MIN_MS = readToken('--dur-tab-settle-min', 120);
+        const TAB_LIFT = readToken('--tab-drag-lift', 0.94);
+
+        /* Where the gesture is claimed. Small enough to precede a scroll, large
+           enough that a tap's jitter does not trip it.
+
+           This is NOT the commit distance and the two must not be confused. The
+           old handler used one number for both — it claimed the gesture only
+           after 100px, which is far too late to drive a drag: nothing can move
+           until the gesture is claimed, and on iOS a touch sequence whose early
+           moves were not cancelled has already been given to the scroller, where
+           later `preventDefault()` calls against it are ignored. */
+        const TAB_AXIS_LOCK_PX = 8;
+
+        /* Fraction of the viewport a drag must cross to commit on distance
+           alone. The 100px the old handler used was a fixed pixel count on a
+           screen whose width it did not know. */
+        const TAB_COMMIT_FRACTION = 1 / 3;
+
+        /* px/ms past which a release commits however short it was — a flick.
+           Measured from the last few moves rather than the whole gesture: a slow
+           drag ending in a flick is a flick, and averaging over the full
+           duration erases exactly the intent this exists to read. */
+        const TAB_FLICK_VELOCITY = 0.5;
+        const TAB_VELOCITY_WINDOW_MS = 100;
+
+        /* How far a drag toward a tab that does not exist actually travels.
+           Enough to say "there is nothing here", not enough to suggest there is. */
+        const TAB_RESIST_DAMPING = 0.25;
+
+        /* THE live tab gesture — a drag or a slide from rest — or null.
+
+           One record for both, deliberately. They share a setup, a teardown and
+           every piece of state that teardown has to clear, and the drag is
+           simply the slide with a finger in front of it. Two records would mean
+           two teardowns, and the failure mode of the second one falling behind
+           the first is a tab left pinned out of the scroller with the page
+           unable to scroll and nothing on screen saying why.
+
+           `drag` is the finger-specific part and is null for a slide from rest.
+
+           An animation is presentation; the tab state it leaves behind is
+           correctness, and that must never depend on a `transitionend`
            arriving. */
         let tabTransition = null;
 
+        /* Read by everything that has to stand aside for a gesture: the grid's
+           windowing, the idle re-warm, the resize handler. One predicate, so
+           there is no second condition to drift from this one. */
+        function tabGestureActive() {
+            return tabTransition !== null;
+        }
+
+        /* Clears EVERYTHING either path sets, and is safe to call repeatedly.
+
+           Enumerated rather than looped over, so adding a setup line without a
+           matching teardown line is visible here rather than discovered as a
+           page that will not scroll. */
         function endTabTransition() {
             if (!tabTransition) return;
-            const { outgoing, incoming, onEnd, timer } = tabTransition;
+            const { outgoing, incoming, onEnd, timer, frame, restoreY } = tabTransition;
             tabTransition = null;
 
             clearTimeout(timer);
-            incoming.removeEventListener('transitionend', onEnd);
+            if (frame !== null) cancelAnimationFrame(frame);
 
-            outgoing.classList.remove('tab-leaving', 'tab-sliding');
-            incoming.classList.remove('tab-entering', 'tab-sliding');
-            outgoing.style.removeProperty('--tab-shift');
-            incoming.style.removeProperty('--tab-shift');
-            outgoing.style.removeProperty('top');
-            document.documentElement.classList.remove('tab-transitioning');
+            for (const panel of [outgoing, incoming]) {
+                if (!panel) continue;
+                /* Removed from BOTH panels rather than from the one that was
+                   expected to fire. A commit watches the incoming tab and an
+                   abandon watches the outgoing one, so a teardown that knows
+                   which is which has to be kept in step with two call sites; one
+                   that removes from both cannot fall out of step with either. */
+                if (onEnd) panel.removeEventListener('transitionend', onEnd);
+                panel.classList.remove(
+                    'tab-leaving', 'tab-entering', 'tab-pinned', 'tab-sliding'
+                );
+                panel.style.removeProperty('--tab-shift');
+                panel.style.removeProperty('--tab-lift');
+                panel.style.removeProperty('--tab-origin-y');
+                panel.style.removeProperty('--dur-tab-settling');
+                panel.style.removeProperty('top');
+            }
+
+            document.documentElement.classList.remove('tab-transitioning', 'tab-dragging');
+
+            /* An abandoned drag has to put the viewer back where they were.
+
+               The order is the whole of it. Both tabs were pinned out of the
+               scroller, which collapsed the document to viewport height and made
+               the browser clamp scrollY to 0; un-pinning restores the full height
+               with the page at the top of the library. The scroll must follow in
+               the SAME synchronous block, with no paint between, or the viewer
+               sees one frame at row 0.
+
+               This forces a layout — the ~78ms hazard the freeze exists to avoid
+               — and that is deliberate here. It lands after the settle has
+               finished, on a frame where nothing is moving, which is the only
+               place in this gesture that cost is affordable.
+
+               Routed through the overlay system for the same reason every other
+               scroll here is: a lock may hold the position. 'instant' because
+               `scroll-behavior: smooth` would otherwise animate a correction
+               that is supposed to be invisible. */
+            if (restoreY !== null && restoreY !== undefined) {
+                window.GlimpseOverlays.scrollPageTo(restoreY, 'instant');
+            }
         }
 
-        function switchTabAnimated(contentName, outgoing, incoming, direction) {
-            // A second swipe mid-flight resolves the first one before starting.
+        /* Take both tabs out of the scroller and render the incoming one.
+
+           Shared by the drag and by a slide from rest, so the freeze exists in
+           exactly one place. `lifted` is the only difference between them: a
+           drag raises the tabs off the page, a slide from rest does not.
+
+           Returns the record, with the incoming tab rendered, both panels
+           pinned, and NOTHING yet moved.
+
+           READ THE SCROLL POSITION BEFORE ANYTHING IS WRITTEN, AND READ NO
+           GEOMETRY AT ALL AFTER THE FREEZE. Measured at library scale: setting
+           the frozen styles costs 0.2-0.4ms, and a single
+           `getBoundingClientRect()` afterwards costs 77.7ms — a forced
+           synchronous layout landing on the gesture's first frame. The transform
+           itself is free (59.9fps on a 1,228,722px box, zero dropped frames), so
+           a hitch here reads as "the slide is janky" and the transform takes the
+           blame. Do not add a measurement to this function. */
+        /* Pin a tab at `viewportTop`, and anchor its scale to what is ON SCREEN.
+         *
+         * THE TRANSFORM ORIGIN IS THE WHOLE OF THIS FUNCTION, and getting it
+         * wrong is not subtle. `transform-origin` defaults to an element's own
+         * centre. A tab holding 7,000 items is 1,227,442px tall, so its centre
+         * is some 600,000px below the viewport — and scaling by 0.94 about a
+         * point that far away moves its top edge down by height x 0.03:
+         *
+         *     measured, 7,000 movies:  the first card jumped +36,791px
+         *
+         * The grid simply left the screen downward the instant a thumb touched
+         * it. Worse, the displacement is proportional to LIBRARY SIZE, so the
+         * 7,000-item tab vanished while the 1,200-item one barely moved — which
+         * presents as "it always shows the TV Shows grid whichever way I swipe",
+         * a routing bug that does not exist.
+         *
+         * So the origin is the centre of the VIEWPORT, expressed in the
+         * element's own coordinates: the element's top edge sits at `viewportTop`
+         * on screen, so the viewport's middle is `middle - viewportTop` down from
+         * that edge. The tab then shrinks around what the viewer is looking at,
+         * which is also the only part of it they can see.
+         *
+         * `CLAUDE.md` warned that a scale moves `getBoundingClientRect().top`.
+         * That was read here as an arithmetic hazard for the grid's windowing —
+         * it is also, and much more urgently, a VISIBLE one. The windowing guard
+         * was necessary and it was not sufficient.
+         */
+        function pinTab(panel, viewportTop, middle) {
+            panel.style.top = `${viewportTop}px`;
+            panel.style.setProperty('--tab-origin-y', `${middle - viewportTop}px`);
+        }
+
+        function beginTabTransition(contentName, outgoing, incoming, lifted) {
+            // Anything still in flight is resolved before a new one starts.
             endTabTransition();
 
-            /* Read the scroll position BEFORE anything is written, and read no
-               geometry at all after the freeze.
-
-               Measured at library scale: setting the frozen styles costs
-               0.2-0.4ms, and a single `getBoundingClientRect()` afterwards costs
-               77.7ms — a forced synchronous layout landing on the animation's
-               first frame. The transform itself is free (59.9fps on a
-               1,228,722px box, zero dropped frames), so a hitch here reads as
-               "the slide is janky" and the transform takes the blame. Do not
-               add a measurement to this function. */
             const y = window.scrollY;
+
+            /* The tab's offset down the DOCUMENT, read here and nowhere later.
+               `.content` starts below the header, so a tab pinned at `-y` sits
+               that far too high — and the header's height is not a constant to
+               hardcode, it shrinks on scroll.
+
+               THIS READ IS SAFE AND THE ONE BELOW IT WOULD NOT BE. Layout is
+               clean at this instant: the browser laid the page out for the last
+               frame and nothing here has written a style yet, so this costs
+               nothing. The 77.7ms figure is for a read AFTER a write, which
+               forces a synchronous re-layout. The rule is not "never measure",
+               it is "never measure something you just invalidated" — so this
+               must stay above every write in this function. */
+            const contentTop = outgoing.getBoundingClientRect().top + y;
+            const viewportMiddle = window.innerHeight / 2;
+
+            const record = {
+                outgoing,
+                incoming,
+                onEnd: null,
+                timer: null,
+                frame: null,
+                drag: null,
+                /* Null means "leave the page where the freeze put it", which is
+                   0 — correct for a commit, because the incoming tab shows its
+                   own top. An abandoned drag sets this to the captured offset. */
+                restoreY: null,
+                y,
+            };
+            tabTransition = record;
 
             const searchTerm = applyTabState(contentName);
 
@@ -2462,26 +2736,54 @@
                spinner from first paint, and revealing it early shows that
                spinner rather than blank rows.
 
+               Skipped outright when that tab is already showing exactly this —
+               see `renderSignature()`. Measured at 7,000 items: 175.3ms to
+               rebuild it against 1.4ms to establish it need not be. A drag pays
+               this with a thumb on the glass, which is why the inactive tab is
+               kept warm at idle rather than rebuilt here.
+
                No card entrance animation — see `filterAndSortMedia()`. */
             filterAndSortMedia(searchTerm, contentName, false);
 
-            // Which way the grids travel. A swipe left sends the outgoing tab
-            // left and brings the incoming one in from the right.
-            const shift = direction === 'forward' ? '-100%' : '100%';
-            const from = direction === 'forward' ? '100%' : '-100%';
-
             document.documentElement.classList.add('tab-transitioning');
 
-            outgoing.style.top = `${-y}px`;
-            outgoing.classList.add('tab-leaving');
-            incoming.style.setProperty('--tab-shift', from);
-            incoming.classList.add('tab-entering');
+            /* BOTH tabs leave the scroller, not just the outgoing one.
 
-            /* The outgoing tab is out of the scroller now, and the incoming one
-               is off screen, so this moves nothing the viewer can see. That is
-               what makes the slide a single continuous movement instead of a
-               jump followed by one. Still routed through the overlay system:
-               an overlay may hold the scroll lock.
+               The shipped transition froze only the outgoing tab and set the
+               page to 0 immediately, because the incoming tab was still in flow
+               and had to show its own top. A drag cannot do that: it can be
+               abandoned, and a page already reset to 0 has discarded the
+               position it must return to. Pinning both makes the document
+               irrelevant for the gesture's duration, so the captured offset
+               stays the only record of where the viewer was.
+
+               A fixed element contributes no scrollable overflow, so pinning
+               both collapses the document to viewport height and the browser
+               clamps scrollY to 0 by itself. The explicit scroll below is kept
+               anyway — see there.
+
+               Both offsets are measured from `contentTop`, not from zero. The
+               outgoing tab renders exactly where it already was; the incoming
+               one shows its own top, which is `contentTop` with the page at 0. */
+            pinTab(outgoing, contentTop - y, viewportMiddle);
+            outgoing.classList.add('tab-leaving');
+            pinTab(incoming, contentTop, viewportMiddle);
+            incoming.classList.add('tab-entering', 'tab-pinned');
+
+            /* Both tabs are out of the scroller and the incoming one is off
+               screen, so this moves nothing the viewer can see. That is what
+               makes the change a single continuous movement instead of a jump
+               followed by one. Routed through the overlay system because a lock
+               may hold the position.
+
+               KEPT rather than left to the browser's own clamping, which does
+               reach the same 0. Clamping is a consequence of the collapsed
+               document, so it is a behaviour to rely on rather than an
+               instruction we gave — and the cost of it not happening is the
+               incoming tab arriving at the outgoing one's scroll offset, which
+               is precisely the failure the freeze exists to prevent. A no-op
+               that states the intent is worth more than an assumption that
+               usually holds. An abandoned drag overrides this at teardown.
 
                'instant' is required, not a preference. `scroll-behavior: smooth`
                is set on the document, so the default animates for about a second
@@ -2490,6 +2792,21 @@
                its own. Measured before this argument existed: the page was still
                at 3000px two frames in and settled at 12px, not 0. */
             window.GlimpseOverlays.scrollPageTo(0, 'instant');
+
+            if (lifted) {
+                document.documentElement.classList.add('tab-dragging');
+                outgoing.style.setProperty('--tab-lift', TAB_LIFT);
+                incoming.style.setProperty('--tab-lift', TAB_LIFT);
+            }
+
+            return record;
+        }
+
+        /* Hand the active class over and arm the teardown. Called at the point
+           the gesture has decided which tab wins — immediately for a slide from
+           rest, at release for a drag. */
+        function commitTabState(record, contentName, durationMs) {
+            const { incoming } = record;
 
             document.querySelectorAll('.content').forEach(content => {
                 content.classList.remove('active');
@@ -2503,17 +2820,26 @@
                 }
             };
             incoming.addEventListener('transitionend', onEnd);
+            record.onEnd = onEnd;
 
-            tabTransition = {
-                outgoing,
-                incoming,
-                onEnd,
-                /* Reduced motion collapses the duration app-wide rather than
-                   removing the transition, so `transitionend` still fires. This
-                   covers the case it does not — an interrupted or dropped
-                   transition must not strand a tab pinned and transformed. */
-                timer: setTimeout(endTabTransition, TAB_TRANSITION_MS + 120),
-            };
+            /* Reduced motion collapses the duration app-wide rather than
+               removing the transition, so `transitionend` still fires. This
+               covers the case it does not — an interrupted or dropped
+               transition must not strand a tab pinned and transformed. */
+            record.timer = setTimeout(endTabTransition, durationMs + 120);
+        }
+
+        function switchTabAnimated(contentName, outgoing, incoming, direction) {
+            const record = beginTabTransition(contentName, outgoing, incoming, false);
+
+            // Which way the grids travel. A swipe left sends the outgoing tab
+            // left and brings the incoming one in from the right.
+            const shift = direction === 'forward' ? '-100%' : '100%';
+            const from = direction === 'forward' ? '100%' : '-100%';
+
+            incoming.style.setProperty('--tab-shift', from);
+
+            commitTabState(record, contentName, TAB_TRANSITION_MS);
 
             /* TWO frames, not one, and the second is the load-bearing one.
 
@@ -2542,6 +2868,245 @@
                     incoming.classList.add('tab-sliding');
                 });
             });
+        }
+
+        /* ------------------------------------------------------------------
+           The tab drag
+
+           The gesture IS the transition. `switchTabAnimated()` above plays a
+           slide the viewer watches; this one hands them the tabs and lets them
+           move them.
+
+           Four phases, and only the second is expensive:
+
+             touchstart      record the origin, claim nothing, do no work
+             axis lock       decide the axis once, then SET UP  (~1.4ms, warm)
+             track           two style writes per frame, read nothing
+             release         commit, abandon, or spring back from a resisted end
+           ------------------------------------------------------------------ */
+
+        /* Where the incoming tab rests before it starts arriving: a FULL
+           viewport out, on the side it comes from.
+
+           A full viewport and not a fraction of one, so the two tabs are edge to
+           edge and never overlap. The first version parked it a third of a
+           viewport out and moved it at a third of the finger's speed — the
+           iOS parallax — and the two grids then sat on top of each other for the
+           whole gesture. Which one won was decided by document order, because
+           both carry the same z-index and `#tvshows-content` comes second, so
+           TV Shows painted over Movies in BOTH directions. It read as the drag
+           always going the same way.
+
+           Edge to edge, the question cannot arise: the tabs move together, one
+           leaving exactly as fast as the other arrives, with the lift's scale
+           opening a small gap between them so they read as two cards. */
+        function parkOffset(direction, width) {
+            return (direction === 'forward' ? 1 : -1) * width;
+        }
+
+        function beginTabDrag(contentName, outgoing, incoming, direction, startX) {
+            const width = window.innerWidth;
+
+            /* A drag toward a tab that does not exist still moves — it resists.
+               Nothing is rendered or pinned for an incoming tab there is none
+               of, so the whole setup is skipped and only the outgoing tab is
+               taken out of the scroller. */
+            const record = incoming
+                ? beginTabTransition(contentName, outgoing, incoming, true)
+                : beginResistedDrag(outgoing);
+
+            record.drag = {
+                contentName,
+                direction,
+                startX,
+                width,
+                offset: 0,
+                /* {x, t} for the last few moves. Velocity is read from the END
+                   of the gesture, not its average — a slow drag finishing in a
+                   flick is a flick. */
+                samples: [{ x: startX, t: performance.now() }],
+                resisted: !incoming,
+            };
+
+            if (incoming) {
+                incoming.style.setProperty('--tab-shift', `${parkOffset(direction, width)}px`);
+            }
+            return record;
+        }
+
+        /* The resisted case: one tab, pinned and lifted, with nothing to arrive.
+           It shares the record shape so one teardown serves both. */
+        function beginResistedDrag(outgoing) {
+            endTabTransition();
+            const y = window.scrollY;
+            // Read before any write, exactly as in beginTabTransition().
+            const contentTop = outgoing.getBoundingClientRect().top + y;
+            const viewportMiddle = window.innerHeight / 2;
+            const record = {
+                outgoing,
+                incoming: null,
+                onEnd: null,
+                timer: null,
+                frame: null,
+                drag: null,
+                restoreY: y,
+                y,
+            };
+            tabTransition = record;
+
+            document.documentElement.classList.add('tab-transitioning', 'tab-dragging');
+            pinTab(outgoing, contentTop - y, viewportMiddle);
+            outgoing.classList.add('tab-leaving');
+            outgoing.style.setProperty('--tab-lift', TAB_LIFT);
+            return record;
+        }
+
+        /* One write pass per frame, however many moves arrived.
+
+           `touchmove` fires at the digitiser's rate, which on a 120Hz panel is
+           twice the frame rate. Writing on every one of them schedules style
+           work the browser will discard, and does it on the frames that can
+           least afford it.
+
+           READS NOTHING. Same ban as the freeze, extended across every frame of
+           the drag — where its cost would be paid sixty times rather than once.
+           Everything needed was captured at lock: the origin, the width, the
+           scroll offset. */
+        function trackTabDrag(x) {
+            const record = tabTransition;
+            if (!record || !record.drag) return;
+
+            const drag = record.drag;
+            drag.offset = x - drag.startX;
+
+            const now = performance.now();
+            drag.samples.push({ x, t: now });
+            while (drag.samples.length > 2 && now - drag.samples[0].t > TAB_VELOCITY_WINDOW_MS) {
+                drag.samples.shift();
+            }
+
+            if (record.frame !== null) return;
+            record.frame = requestAnimationFrame(() => {
+                record.frame = null;
+                if (tabTransition !== record) return;
+
+                if (drag.resisted) {
+                    record.outgoing.style.setProperty(
+                        '--tab-shift', `${drag.offset * TAB_RESIST_DAMPING}px`
+                    );
+                    return;
+                }
+
+                /* Both tabs track the finger at the same rate, a viewport
+                   apart. The pair moves as one strip: the outgoing tab's
+                   trailing edge and the incoming tab's leading edge stay
+                   exactly a viewport apart for the whole gesture, so one is
+                   always replacing the other rather than covering it. */
+                const park = parkOffset(drag.direction, drag.width);
+                record.outgoing.style.setProperty('--tab-shift', `${drag.offset}px`);
+                record.incoming.style.setProperty('--tab-shift', `${park + drag.offset}px`);
+            });
+        }
+
+        function dragVelocity(drag) {
+            const samples = drag.samples;
+            if (samples.length < 2) return 0;
+            const first = samples[0];
+            const last = samples[samples.length - 1];
+            const elapsed = last.t - first.t;
+            return elapsed > 0 ? (last.x - first.x) / elapsed : 0;
+        }
+
+        /* Distance OR velocity, and never latched.
+
+           A drag that passed the threshold and came back is an abandon. Latching
+           would mean the tabs keep following a finger whose gesture has already
+           been decided, which is the thing this whole change removes. */
+        function dragCommits(drag) {
+            if (drag.resisted) return false;
+
+            const travelled = Math.abs(drag.offset);
+            const towardIncoming = drag.direction === 'forward' ? drag.offset < 0 : drag.offset > 0;
+            if (!towardIncoming) return false;
+
+            if (travelled >= drag.width * TAB_COMMIT_FRACTION) return true;
+
+            const velocity = dragVelocity(drag);
+            const flickingToward = drag.direction === 'forward' ? velocity < 0 : velocity > 0;
+            return flickingToward && Math.abs(velocity) >= TAB_FLICK_VELOCITY;
+        }
+
+        /* Timed from what is left to travel, not from a fixed duration.
+
+           A fixed 280ms is wrong at both ends: a tab released at 95% spends the
+           full time crossing the last sliver, and one released at 5% covers
+           nearly the whole viewport in it. Floored so a near-complete drag still
+           resolves visibly rather than snapping, and capped at `--dur-tab` so a
+           commit from rest takes exactly as long as the transition did before
+           this gesture existed. */
+        function settleDuration(remaining, width) {
+            const fraction = width > 0 ? Math.min(1, Math.abs(remaining) / width) : 1;
+            return Math.max(TAB_SETTLE_MIN_MS, Math.round(TAB_TRANSITION_MS * fraction));
+        }
+
+        function settleTabDrag() {
+            const record = tabTransition;
+            if (!record || !record.drag) return;
+
+            const drag = record.drag;
+            const { outgoing, incoming } = record;
+
+            if (record.frame !== null) {
+                cancelAnimationFrame(record.frame);
+                record.frame = null;
+            }
+
+            const commit = dragCommits(drag);
+            const target = commit ? (drag.direction === 'forward' ? -drag.width : drag.width) : 0;
+            const duration = settleDuration(target - drag.offset, drag.width);
+
+            /* The gesture is over: the tabs are being put down, so the lift
+               releases over the same movement that carries them home. */
+            for (const panel of [outgoing, incoming]) {
+                if (!panel) continue;
+                panel.style.setProperty('--dur-tab-settling', `${duration}ms`);
+                panel.classList.add('tab-sliding');
+                panel.style.setProperty('--tab-lift', '1');
+            }
+
+            if (commit) {
+                outgoing.style.setProperty('--tab-shift', `${target}px`);
+                incoming.style.setProperty('--tab-shift', '0px');
+                commitTabState(record, drag.contentName, duration);
+                record.drag = null;
+                return;
+            }
+
+            /* Abandoned. Both tabs go home and the viewer is returned to the
+               scroll position the gesture started from — see `endTabTransition`
+               for why the restore has to happen there rather than here. */
+            outgoing.style.setProperty('--tab-shift', '0px');
+            if (incoming) {
+                incoming.style.setProperty(
+                    '--tab-shift', `${parkOffset(drag.direction, drag.width)}px`
+                );
+                /* The tab that was arriving is not arriving. `applyTabState()`
+                   already moved the tab controls, genre list and Actions tray to
+                   it during setup, so they have to be moved back — the drag is
+                   abandoned, not merely un-animated. */
+                applyTabState(outgoing.id.replace('-content', ''));
+            }
+            record.restoreY = record.y;
+
+            const finish = event => {
+                if (event.target === outgoing && event.propertyName === 'transform') {
+                    endTabTransition();
+                }
+            };
+            outgoing.addEventListener('transitionend', finish);
+            record.onEnd = finish;
+            record.timer = setTimeout(endTabTransition, duration + 120);
+            record.drag = null;
         }
 
         // Tab switching - update for both desktop and mobile tabs
@@ -2951,9 +3516,125 @@
            is travelling across the viewport as one object is already a soft
            arrival, and staggering its cards underneath the slide is both
            redundant and the most expensive thing on that frame. */
+        /* Everything that decides what a tab's grid shows, as one string.
+
+           MAKE THIS TOTAL, NOT CLEVER. It exists so a render can be skipped, and
+           the two ways it can be wrong do not cost the same. Reporting a current
+           tab as stale costs a render nobody needed — 143ms, and nothing else.
+           Reporting a stale tab as current shows the viewer a grid that does not
+           match their search, sort or genre, and this application's oldest
+           failure is a wrong library that looks like a working one. Anything
+           that can change what the window shows belongs here; if you are not
+           sure whether it does, it belongs here.
+
+           `data.length` stands in for the snapshot's identity. The library is
+           loaded once at boot and never mutated in place, so a change to it is a
+           reload — but a server switch swaps the arrays, and the length is what
+           notices.
+
+           `JSON.stringify` rather than joining on a delimiter, because two of
+           these fields are free text. The search term and the genre both admit
+           spaces, so a space-joined signature cannot tell searching "a b" in
+           genre "c" from searching "a" in genre "b c" — they produce the same
+           string. That is a collision in the one direction this must never be
+           wrong in: two different selections reported as the same, which shows
+           the viewer the other one's grid. Any single delimiter has some such
+           pair; quoting removes the question rather than moving it. */
+        function renderSignature(type, searchTerm, data) {
+            return JSON.stringify([type, searchTerm, currentGenre, currentSortMethod, data.length]);
+        }
+
+        /* Keep the tab the viewer is NOT looking at current, at idle.
+
+           `requestIdleCallback` is not in Safari before 16.4, and iOS is the
+           platform this whole gesture exists for, so the fallback is not
+           defensive tidiness — without it the warm never runs on a large share
+           of the devices that need it, the drag silently pays the full render
+           every time, and it presents as the gesture being slow on iPhones
+           only. The timeout option bounds the wait where rIC does exist: a
+           browser that never goes idle must still warm the tab eventually. */
+        let pendingWarm = null;
+
+        /* A pending warm is stored as the closure that cancels it, not as a
+           handle plus a canceller to pair with it.
+
+           `requestIdleCallback` and `setTimeout` both return a number, from
+           unrelated id spaces. Holding just the number and calling both
+           cancellers means `clearTimeout` is handed an idle handle — which is a
+           valid timeout id belonging to something else, cancelled silently.
+
+           Pairing them in an object fixes that and introduces a worse one:
+           `pendingWarm.cancel(...)` invokes a native function as a method, so
+           `this` is the object rather than `window`, and both of these throw
+           `TypeError: Illegal invocation` when called that way. A closure has
+           neither problem — the handle is captured, and the call keeps its
+           original receiver. */
+        function cancelWarm() {
+            if (pendingWarm === null) return;
+            pendingWarm();
+            pendingWarm = null;
+        }
+
+        function warmInactiveTab(justRendered) {
+            const other = justRendered === 'movies' ? 'tvshows' : 'movies';
+            cancelWarm();
+
+            const run = () => {
+                pendingWarm = null;
+                /* Re-checked at run time, not at schedule time. Idle is later,
+                   and a drag may have started in between — warming then would
+                   rebuild a grid that is on screen and mid-gesture. */
+                if (tabGestureActive()) return;
+                const term = document.querySelector('.search-input').value.toLowerCase();
+                filterAndSortMedia(term, other, false);
+            };
+
+            if (typeof requestIdleCallback === 'function') {
+                const handle = requestIdleCallback(run, { timeout: 2000 });
+                pendingWarm = () => cancelIdleCallback(handle);
+            } else {
+                const handle = setTimeout(run, 200);
+                pendingWarm = () => clearTimeout(handle);
+            }
+        }
+
         function filterAndSortMedia(searchTerm, type, animateCards = true) {
             const target = type || document.querySelector('.tab.active').dataset.content;
             const data = target === 'movies' ? moviesData : tvShowsData;
+
+            /* Already showing exactly this. Rebuilding it would produce the same
+               nodes for 143ms at library scale, and the drag moves that cost
+               from the dead air after a finger lifts onto the first frame of a
+               gesture the viewer is driving.
+
+               Both conditions are required. The signature says the SELECTION is
+               unchanged; `rendered` says the grid actually holds the result of
+               it. A view whose signature matches but which was emptied — by a
+               server switch, or by a render that threw — must rebuild.
+
+               An entrance animation is a reason to render anyway: the caller is
+               asking for the cards to arrive, not merely to be present.
+
+               THE WINDOW POSITION IS PART OF WHAT IS RENDERED, and leaving it
+               out of this shipped a blank grid. The signature answers "is the
+               selection unchanged" and says nothing about WHERE the rendered
+               window sits. Scrolling a tab moves that window — at 6,000px the
+               grid was rendering from item 24, standing on a ~4,000px spacer —
+               and the tab is then shown again at its TOP, where the spacer is.
+               Every caller that skips is about to show the tab from its first
+               item, so the window has to be there. Measured before this branch
+               existed: 0 of 120 rendered cards on screen, and the viewer had to
+               scroll down four thousand pixels to find their own library.
+
+               Re-windowing is not re-rendering: ~45ms to rebuild the window
+               against data already filtered and sorted, against ~175ms to do
+               the whole thing again. The skip keeps its value. */
+            const signature = renderSignature(target, searchTerm, data);
+            const view = gridView(target);
+            if (!animateCards && view.signature === signature && view.rendered > 0) {
+                if (view.first !== 0) renderWindow(view, 0, false);
+                return;
+            }
 
             // First filter by search term
             let filtered = data.filter(item =>
@@ -2972,6 +3653,24 @@
 
             // Display the sorted data
             displayMedia(sortedData, target, animateCards);
+
+            /* Recorded only after the render has actually happened, so a throw
+               above leaves the view marked stale rather than marked as holding
+               something it does not. */
+            view.signature = signature;
+
+            /* Bring the OTHER tab up to date while nothing is waiting on it.
+
+               This is what makes the skip above hit rather than merely exist. A
+               drag has to have the incoming tab rendered before it can move it,
+               and the thumb is already on the glass by then; doing it here moves
+               that work to a moment with no gesture in it.
+
+               Reached only when a render actually happened — the early return
+               above skips this too. That is what terminates the recursion:
+               rendering movies warms tvshows, which finds movies already current
+               and returns before scheduling anything. */
+            warmInactiveTab(target);
         }
 
         /* ------------------------------------------------------------------
@@ -3046,6 +3745,11 @@
                 rowGap: 0,
                 topSpacer: makeSpacer(),
                 bottomSpacer: makeSpacer(),
+                /* What this view last rendered, as a signature — see
+                   `renderSignature()`. Null means "nothing", which is not the
+                   same as "something that happens not to match": a tab that has
+                   never rendered must always render. */
+                signature: null,
             };
 
             /* One delegated listener for the whole grid, not one per card.
@@ -3223,6 +3927,24 @@
            the current window must cost nothing, or the fix reintroduces
            per-frame work by another route. */
         function updateGridWindow(view) {
+            /* Not while the tabs are mid-gesture.
+
+               The window is derived from `getBoundingClientRect().top`, and the
+               drag's lift applies a scale — which moves that top for every card
+               in the grid. A window computed now would be computed against a
+               position the viewer never occupied, and it would present as an
+               off-by-one in the grid rather than as anything to do with a
+               transform.
+
+               THIS IS THE SAFETY. It is not the fact that a tab pinned with
+               `position: fixed` receives no scroll events — that is true today,
+               it is a consequence of the freeze rather than a property of the
+               lift, and a safety implied by a mechanism disappears the moment
+               the mechanism changes. This project has already shipped a pair of
+               conditions that were meant to be one and drifted; an explicit
+               refusal cannot drift from itself. */
+            if (tabGestureActive()) return;
+
             if (!view || view.data.length === 0 || view.rowPitch <= 0) return;
             const first = desiredFirstIndex(view);
             if (first === view.first) return;
@@ -3246,6 +3968,13 @@
             }
             window.addEventListener('scroll', schedule, { passive: true });
             window.addEventListener('resize', () => {
+                /* Resolve a live gesture BEFORE re-measuring, not after.
+                   Everything below reads geometry, and a drag has both tabs
+                   pinned, scaled and translated — measuring through that reads
+                   a layout that does not exist at any width. Ending the gesture
+                   first also means a rotation mid-drag leaves nothing pinned. */
+                endTabTransition();
+
                 const view = activeGridView();
                 if (!view || view.data.length === 0) return;
                 // `perRow` changes with width, so every row index computed for
@@ -3304,6 +4033,14 @@
                 // Show no results message and hide the grid
                 noResultsDiv.classList.add('active');
                 grid.style.display = 'none';
+
+                /* This path renders no cards and leaves `view.data` holding the
+                   previous selection's items, so the view is not a valid thing
+                   to skip a render against. Saying so here rather than trusting
+                   the signature: re-rendering an empty result costs nothing, and
+                   the alternative is a skip that leaves a stale `view.data`
+                   behind a grid the delegated click listener still reads from. */
+                gridView(type).rendered = 0;
 
                 return;
             }
@@ -3649,112 +4386,136 @@
         const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || window.innerWidth < 768;
 
         if (isMobile) {
-            // Variables to track swipe
-            let touchStartX = 0;
-            let touchEndX = 0;
-            let touchStartY = 0;
-            let touchEndY = 0;
-            let swipeThreshold = 100; // Minimum distance to be considered a swipe
-            let swipeAngleThreshold = 30; // Maximum angle in degrees to be considered a horizontal swipe
+            const container = document.querySelector('.container');
 
-            // Get swipe indicator element
+            /* The axis, resolved once per touch and then held:
+                 null       not yet decided
+                 'x'        ours — the tabs are following this finger
+                 'y'        the scroller's, for the rest of this touch's life */
+            let axis = null;
+            let originX = 0;
+            let originY = 0;
+
+            /* There is no first-load tip any more.
+
+               There used to be a toast reading "Swipe left or right to switch
+               between Movies and TV Shows", two seconds after load. It existed
+               because the gesture was undiscoverable: nothing moved until the
+               finger lifted, so a viewer who half-swiped and saw nothing had no
+               way to learn there was a gesture at all.
+
+               A drag teaches itself. The page moves the moment the thumb does,
+               and it moves back if you let go — which is both halves of the
+               lesson, delivered by trying it rather than by being told. A toast
+               explaining a gesture that demonstrates itself is noise. */
+            /* ^ That reasoning was wrong and the tip is back.
+
+               A drag only demonstrates itself to a viewer who already tries it.
+               The gesture still has no visible affordance at rest, so removing
+               the one thing that says it exists left it discoverable by accident
+               only. What IS gone is the other toast — "Switched to TV Shows",
+               after a commit — which was a caption for a transition that did not
+               exist when it was written. The motion states that now, and states
+               the direction with it. */
             const swipeIndicator = document.querySelector('.swipe-indicator');
-
-            // Show swipe tip on first load for mobile users
             setTimeout(() => {
-                swipeIndicator.textContent = 'Swipe left or right to switch between Movies and TV Shows';
+                swipeIndicator.textContent =
+                    'Swipe left or right to switch between Movies and TV Shows';
                 swipeIndicator.style.opacity = '1';
-
-                // Hide the tip after 3 seconds
                 setTimeout(() => {
                     swipeIndicator.style.opacity = '0';
                 }, 3000);
             }, 2000);
 
-            // Add touch event listeners to the container
-            const container = document.querySelector('.container');
+            function touchInsideOverlay(target) {
+                return !!(target && target.closest &&
+                    target.closest('.sheet, .modal, .overlay-backdrop'));
+            }
 
-            container.addEventListener('touchstart', (e) => {
-                touchStartX = e.touches[0].clientX;
-                touchStartY = e.touches[0].clientY;
-            }, false);
+            /* Refused at touchstart, not at touchend.
 
-            container.addEventListener('touchmove', (e) => {
-                // Prevent default only if we detect a significant horizontal movement
-                // This allows vertical scrolling to continue working normally
-                const currentX = e.touches[0].clientX;
-                const currentY = e.touches[0].clientY;
+               The old handler checked when the gesture was over, which is enough
+               when nothing has moved. A drag that discovers the conflict later
+               has already suppressed the browser's handling and taken both tabs
+               out of the scroller. A touch inside an overlay belongs to that
+               overlay — its own dismissal drag, a scroll in its body, or a
+               backdrop tap — and never to the tabs behind it. */
+            function gestureRefused(event) {
+                return window.GlimpseOverlays.anyOverlayOpen() ||
+                    touchInsideOverlay(event.target);
+            }
 
-                const diffX = touchStartX - currentX;
-                const diffY = touchStartY - currentY;
-
-                // If horizontal movement is greater than vertical and exceeds threshold
-                if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > swipeThreshold) {
-                    e.preventDefault();
+            container.addEventListener('touchstart', event => {
+                axis = null;
+                if (event.touches.length !== 1 || gestureRefused(event)) {
+                    axis = 'y';
+                    return;
                 }
-            }, { passive: false });
+                originX = event.touches[0].clientX;
+                originY = event.touches[0].clientY;
+                // Nothing else. A tap and a vertical scroll must both stay free.
+            }, { passive: true });
 
-            container.addEventListener('touchend', (e) => {
-                touchEndX = e.changedTouches[0].clientX;
-                touchEndY = e.changedTouches[0].clientY;
-                handleSwipe();
-            }, false);
+            /* Non-passive from the start, and that is load-bearing.
 
-            // Handle swipe gesture
-            function handleSwipe() {
-                // Calculate distances and angle
-                const diffX = touchStartX - touchEndX;
-                const diffY = touchStartY - touchEndY;
-                const angle = Math.atan2(Math.abs(diffY), Math.abs(diffX)) * 180 / Math.PI;
+               `preventDefault()` has to be available on the FIRST move that
+               crosses the lock distance. A listener registered passive cannot
+               call it at all, and on iOS a touch sequence whose early moves went
+               uncancelled has already been handed to the scroller — where later
+               attempts to cancel it are ignored, silently. The gesture then
+               works everywhere except the platform it was written for. */
+            container.addEventListener('touchmove', event => {
+                if (axis === 'y' || event.touches.length !== 1) return;
 
-                // Check if swipe is horizontal enough (angle less than threshold)
-                if (angle < swipeAngleThreshold) {
-                    // A swipe inside an overlay belongs to that overlay — the
-                    // tray's own dismiss gesture, or a scroll in its body — not
-                    // to the tab switcher behind it.
-                    if (isOverlayOpen('detailOpen')) {
+                const x = event.touches[0].clientX;
+                const y = event.touches[0].clientY;
+
+                if (axis === null) {
+                    const dx = x - originX;
+                    const dy = y - originY;
+                    if (Math.abs(dx) < TAB_AXIS_LOCK_PX && Math.abs(dy) < TAB_AXIS_LOCK_PX) {
                         return;
                     }
-
-                    // Get current active tab
-                    const activeTab = document.querySelector('.tab.active').dataset.content;
-
-                    // Calculate swipe distance and direction
-                    const distance = Math.abs(diffX);
-
-                    if (distance > swipeThreshold) {
-                        /* The direction is passed through so the outgoing grid
-                           leaves toward the finger. Without it `switchTab()`
-                           falls back to the instant swap, which is also what a
-                           tab click gets.
-
-                           No toast after a successful swipe. There used to be
-                           one — "Switched to TV Shows", 1.5s — and it was a
-                           caption for a transition that did not exist: when the
-                           tab change was an instant cut, nothing on screen
-                           connected the gesture to its result. The slide is that
-                           confirmation now, and it says more than the toast did,
-                           because it also states which direction the viewer
-                           travelled. Announcing it a second time, in words,
-                           after the fact, is one confirmation too many.
-
-                           The first-load tip above stays. It teaches a gesture
-                           that is otherwise undiscoverable, which nothing else
-                           does. */
-                        if (diffX > 0) {
-                            // Swiped left, show TV Shows
-                            if (activeTab === 'movies') {
-                                switchTab('tvshows', 'forward');
-                            }
-                        } else {
-                            // Swiped right, show Movies
-                            if (activeTab === 'tvshows') {
-                                switchTab('movies', 'back');
-                            }
-                        }
+                    /* Decided once. A gesture that re-arbitrates mid-drag can
+                       hand a moving page back to the scroller halfway through. */
+                    if (Math.abs(dy) >= Math.abs(dx)) {
+                        axis = 'y';
+                        return;
                     }
+                    axis = 'x';
+
+                    const active = document.querySelector('.tab.active').dataset.content;
+                    const forward = dx < 0;
+                    const target = forward ? 'tvshows' : 'movies';
+                    const outgoing = document.querySelector('.content.active');
+                    /* Null when the drag is toward a tab that does not exist.
+                       `beginTabDrag` resists rather than refusing: doing nothing
+                       is indistinguishable from a gesture that was not
+                       recognised, and the viewer is owed the difference. */
+                    const incoming = active === target
+                        ? null
+                        : document.getElementById(`${target}-content`);
+
+                    beginTabDrag(target, outgoing, incoming, forward ? 'forward' : 'back', originX);
                 }
-            }
+
+                event.preventDefault();
+                trackTabDrag(x);
+            }, { passive: false });
+
+            container.addEventListener('touchend', () => {
+                if (axis === 'x') settleTabDrag();
+                axis = null;
+            }, { passive: true });
+
+            /* A system gesture or an incoming call ends the touch without a
+               `touchend`. Without this the tabs stay pinned out of the scroller
+               and the grid stays refusing to re-window — a page that will not
+               scroll, with nothing on screen to explain it. */
+            container.addEventListener('touchcancel', () => {
+                if (axis === 'x') settleTabDrag();
+                axis = null;
+            }, { passive: true });
         }
 
         /**
