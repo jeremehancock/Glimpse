@@ -542,6 +542,26 @@ authored HTML/CSS/JS served as written; a rollback is a revert.
 All of these need a thumb, and none of them blocks the change. They are the
 content of task 8.10.
 
+**Resolved on the phone — the grids are not aligned across a drag, and stay that
+way.** Dragging *away* from a scrolled tab leaves the two grids at different row
+phases: the outgoing shows where the viewer was, with its top row cut off by the
+header, while the incoming shows its own first row cleanly. Up to one row of
+mismatch, visible only for the duration of that gesture. Dragging *back* is
+pixel-aligned, because both windows are then at the top.
+
+Two ways to remove it were offered and both declined:
+
+| | Approach | Why not |
+| --- | --- | --- |
+| A | Carry the scroll depth across the drag, so both grids render at the same offset | Rows would line up exactly, but the viewer would land at an arbitrary depth in the incoming tab rather than at its top — a shipped requirement, and a real behaviour change for a cosmetic gain |
+| B | Snap the page to the top when the drag is claimed | Aligns them, at the cost of the outgoing tab jumping from where the viewer was to row 0 on the first frame of every drag — the exact jump the whole freeze architecture exists to prevent |
+
+So this is a **decision, not an outstanding defect**. The incoming tab shows its
+top because that is what a tab change does in this application, and a drag makes
+that briefly visible rather than making it wrong. Recorded here because it looks
+like a bug, was reported as one, and the next person to see it should find the
+reasoning rather than re-derive it.
+
 - **The lift's exact scale.** 0.94 is the working number and it is a look, not
   a measurement. Confirm on a real phone against real artwork — a grid of
   posters shrinking reads differently from a plain surface.
