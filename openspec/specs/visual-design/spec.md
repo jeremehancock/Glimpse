@@ -499,51 +499,6 @@ looked authoritative.
 - **THEN** the declaration SHALL be removed rather than kept alongside the live
   ones
 
-### Requirement: A tab being dragged is lifted off the page
-
-When a tab drag is claimed, the moving tab SHALL take on a raised presentation
-for the duration of the gesture: reduced in size, with the surface behind it
-dimmed.
-
-The raise SHALL NOT be expressed as a drop shadow or a corner radius. These
-panels are as tall as the entire library and pinned at the viewer's scroll
-offset, so only one viewport of each is ever on screen and neither end of them
-is: a shadow renders solely as a band down each vertical edge that tracks the
-thumb, and a radius renders nothing at all.
-
-The lift arrives as the gesture is claimed rather than easing in over the drag,
-so that the viewer's first frame of feedback is the confirmation that their
-thumb was recognised. It is removed when the gesture resolves, by the same
-routine that clears everything else the drag set.
-
-Without it a tab sliding sideways reads as a page repainting. With it the tab
-reads as a card the viewer is pushing aside — which is what the gesture is, and
-what makes it feel like an application rather than a document.
-
-The lift's scale and the scrim SHALL be drawn from the shared token set, not
-restated at the point of use.
-
-#### Scenario: The lift appears when the gesture is claimed
-
-- **WHEN** a horizontal tab drag is claimed
-- **THEN** the moving tab SHALL be visibly raised — reduced in size — and the
-  surface behind it SHALL be dimmed
-
-#### Scenario: The lift does not appear for a scroll or a tap
-
-- **WHEN** a touch resolves to a vertical scroll or ends as a tap
-- **THEN** no lift SHALL appear at any point
-
-#### Scenario: The lift is removed when the gesture resolves
-
-- **WHEN** a tab drag commits, is abandoned, or is cancelled
-- **THEN** the lift and the scrim SHALL both be removed
-
-#### Scenario: The lift lands instantly under reduced motion
-
-- **WHEN** the viewer has asked for reduced motion and a tab drag is claimed
-- **THEN** the lift SHALL take effect without a visible easing
-
 ### Requirement: Direct manipulation is not reduced by a reduced-motion preference
 
 Where the viewer is moving something with their own finger, the reduced-motion
@@ -572,4 +527,65 @@ the reasonable-looking grounds that it is an animation.
 - **THEN** the element SHALL reach its resting position without a sustained
   animation, and any state that depends on that movement completing SHALL
   still resolve
+
+### Requirement: A dragged tab is moved, and nothing else is done to it
+
+A tab being dragged SHALL be displaced horizontally and SHALL NOT be given any
+other presentational treatment for the duration of the gesture. It SHALL NOT be
+scaled, and the surface behind it SHALL NOT be dimmed, tinted, or otherwise
+altered.
+
+It SHALL also keep the box it had in the page. Taking a tab out of the scroller
+SHALL NOT change its width or its horizontal position, so the grid inside it
+holds its column count and its card size for the whole gesture. A fixed element
+does not inherit its container's padding, so a tab pinned to the viewport's
+edges is wider than the tab was — measured at +20px, which the grid spends on
+its cards. A grid that grows when a thumb lands and shrinks when it lifts is the
+same defect as one that drops.
+
+The raised presentation was built and shipped, and the viewer's report of it was
+that the grid drops. A scale anchored to the centre of the viewport moves
+everything above that centre downward — measured at roughly 23px of vertical
+displacement on a phone-sized viewport, arriving instantly as the gesture is
+claimed and reversing on release. In a gesture whose entire meaning is
+horizontal, a vertical movement is not read as depth. It is read as the page
+misbehaving, and it lands before any horizontal motion has begun, so it is the
+first thing seen.
+
+The scrim SHALL go with the scale rather than survive it. What it dimmed was the
+gap the scale opened between the two tabs — 23px of page down each side, which
+is what made the panels read as lifted. Unscaled, what separates them is the
+page's own padding: the same strip of background the page shows at its edges
+while nobody is touching it. Dimming that does not read as depth; it reads as a
+tinted stripe tracking the thumb, which is precisely how the drop shadow failed
+before it.
+
+Depth on these panels SHALL NOT be reintroduced by another route. Elevation and
+corner radius were tried before the scale and removed for a reason that still
+holds and is not about taste: a tab is as tall as the whole library and pinned at
+the viewer's scroll offset, so only one viewport of it is ever on screen and
+neither end of it is. A shadow renders as a band down each vertical edge tracking
+the thumb; a radius renders nothing at all.
+
+#### Scenario: A dragged tab keeps its size
+
+- **WHEN** a horizontal tab drag is claimed and driven across the viewport
+- **THEN** neither tab SHALL change size at any point, and no content in either
+  tab SHALL move vertically
+
+#### Scenario: Taking a tab out of the scroller does not resize it
+
+- **WHEN** a tab is pinned for a drag or a transition
+- **THEN** its width and its horizontal position SHALL be those it had in the
+  page, and the cards in its grid SHALL keep the size they had at rest
+
+#### Scenario: The page behind the tabs is not dimmed
+
+- **WHEN** a tab drag is in progress at any offset
+- **THEN** no scrim, tint or overlay SHALL be drawn behind or over either tab
+
+#### Scenario: The gesture's first frame is horizontal
+
+- **WHEN** a drag is claimed at the axis-lock distance
+- **THEN** the only change on screen SHALL be the tabs' horizontal offset
 
