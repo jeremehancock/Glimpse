@@ -608,26 +608,40 @@
            carries `.active` — so these force display themselves rather than
            relying on it.
 
-           TRANSLATE ON THE HORIZONTAL AXIS ONLY. `firstVisibleRow()` derives
-           the grid's window from `getBoundingClientRect().top`, so a translateY
-           moves the row arithmetic while the transition runs and a scroll
-           mid-flight re-windows the grid against a position the viewer never
-           occupied. It presents as an off-by-one in the window, not as a layout
-           bug. `--tab-shift` is an X offset and there is no Y equivalent on
-           purpose.
+           A HORIZONTAL TRANSLATE, AND NOTHING ELSE. There is no exception and
+           there was one — this rule composed a `scale()` into the same transform
+           for a "lift" during a drag, and it is gone. Two reasons, and the
+           second is the one to hold on to.
 
-           THE LIFT'S SCALE IS THE ONE EXCEPTION, AND IT IS NOT A LOOSENING OF
-           THAT RULE — it is the rule's precondition, stated and enforced. A
-           scale moves every card's measured top exactly as a translateY would.
-           It is admissible only because `updateGridWindow()` refuses outright
-           while a tab gesture is live, so no window can be computed against a
-           transformed rect. That guard and this scale arrive together; remove
-           either and the other is a bug. Do not reach for the fact that a fixed
-           tab receives no scroll events — that is true and it is not the
-           safety, because it stops being true the moment the mechanism changes.
+           It moved the grid VERTICALLY, in a gesture that is entirely
+           horizontal. A scale about the viewport's midpoint pulls everything
+           above that midpoint down toward it: ~23px on a phone, arriving the
+           instant the gesture was claimed and reversing on release. It was
+           reported as the grid dropping, which is exactly what it was.
 
-           `--tab-lift` is 1 at rest, so a transition that is not a drag composes
-           to exactly the transform it had before this gesture existed. */
+           And these panels are ENORMOUS — as tall as the whole library,
+           1,227,442px at 7,000 items, pinned at the captured scroll offset, so
+           only one viewport of one is ever on screen and neither of its ends is.
+           That is the first fact to reason from here, not the last. It is why a
+           `box-shadow` renders only as a blurred band down each vertical edge
+           tracking the thumb, why a `border-radius` renders nothing whatsoever,
+           and why the scale needed a hand-set `transform-origin` to stay on
+           screen at all (the default origin — the element's own centre, some
+           600,000px below the viewport — threw the first card +36,791px
+           downward, and the displacement scaled with library size). All three
+           were tried, all three are gone. Anything that is not a translateX on
+           this rule has to answer that geometry first.
+
+           The windowing side of the same rule still stands on its own:
+           `firstVisibleRow()` derives the grid's window from
+           `getBoundingClientRect().top`, so a translateY — or a scale — moves
+           the row arithmetic against a position the viewer never occupied. It
+           presents as an off-by-one in the window, not as a layout bug.
+           `--tab-shift` is an X offset and there is no Y equivalent on purpose.
+
+           `--tab-shift` is 0 at rest, so a transition that is not a drag
+           composes to exactly the transform it had before this gesture
+           existed. */
         /* `will-change` is declared on the frozen/parked state rather than on
            `.tab-sliding`, so the compositing layer is promoted during the setup
            frame instead of on the transform's first frame. Declaring it
@@ -636,13 +650,7 @@
         .content.tab-leaving,
         .content.tab-entering {
             display: block;
-            transform: translateX(var(--tab-shift, 0)) scale(var(--tab-lift, 1));
-            /* The viewport's centre in this element's coordinates, set inline by
-               `pinTab()`. NOT the default 50%: these panels are as tall as the
-               library, so their centre is hundreds of thousands of pixels below
-               the screen, and scaling about it throws the grid downward by
-               `height x 0.03` — measured at +36,791px. See `pinTab()`. */
-            transform-origin: 50% var(--tab-origin-y, 50%);
+            transform: translateX(var(--tab-shift, 0));
             will-change: transform;
         }
 
@@ -657,75 +665,66 @@
            gesture's duration, so the captured offset stays the only truth about
            where the viewer was.
 
-           `top` is set inline on the outgoing tab, to the captured scroll offset.
-           The incoming one always sits at 0 — it is showing its own top. */
-        .content.tab-leaving {
-            position: fixed;
-            left: 0;
-            right: 0;
-        }
+           THE BOX IS SET INLINE — `top`, `left` AND `width` — AND NOT ONE OF
+           THE THREE IS A CONSTANT HERE.
 
+           A fixed element does not inherit its container's padding, so
+           `left: 0; right: 0` — which is what these rules said — spans the tab
+           across the whole viewport. `.content` sits inside `.container`, which
+           is padded, so pinning WIDENED the grid by both paddings the instant a
+           gesture was claimed and snapped it back on release: measured at +20px,
+           which `auto-fill` spends on the cards, ~10px each at two columns.
+
+           That predates the drag and it was never seen, because the lift's
+           `scale(0.94)` shrank the over-wide tab back to within 2px of its
+           in-flow width — one accident cancelling another. Removing the lift
+           uncovered it, and a grid that changes size when a thumb lands is the
+           same complaint as a grid that drops.
+
+           So `pinTab()` writes the tab's own in-flow box, from the rect
+           `beginTabTransition()` already reads before its first write. The two
+           tabs stay one viewport apart, so what shows between them mid-drag is
+           a gutter the width of the page's own padding — the same strip of
+           background the page shows at its edges at rest.
+
+           `top` is the captured scroll offset for the outgoing tab; the
+           incoming one sits at its own top. Neither is 0: pinning at 0 tucks the
+           grid under the header, because that is where `.content` starts in the
+           document. */
+        .content.tab-leaving,
         .content.tab-entering.tab-pinned {
             position: fixed;
-            left: 0;
-            right: 0;
-            /* `top` is set inline by `pinTab()`, to the tab's own offset below
-               the header rather than to 0. Pinning at 0 tucks the grid under the
-               header, because that is where `.content` starts in the document
-               and a fixed element does not inherit the container's padding. */
         }
 
-        /* The lift is a SCALE AND A SCRIM. It has no rule of its own, and both
-           of the properties a "raised card" normally also carries were tried
-           here and removed. The reason is the same one in both cases, and it is
-           the first thing to hold in mind about these panels: they are as tall
-           as the whole library — 1,227,442px at 7,000 items — and pinned at the
-           captured scroll offset, so only one viewport of each is ever on
-           screen and neither end is.
+        /* THERE IS NO SCRIM, and there was one: a pseudo-element on the root,
+           keyed off a class the gesture added, dimming the page behind the two
+           panels so the tab read as a card lifted off it. It went with the
+           scale, and not as a matter of taste — without the scale it had
+           nowhere to render.
 
-           NO ELEVATION. A `box-shadow` on a panel that tall puts its top and
-           bottom shadows far off screen; all that renders is a blurred band down
-           each vertical edge, tracking the tab as it moves. With the tabs 24px
-           apart, two of those bands sit in that gap at once. It read as visual
-           noise following the thumb, which is what it was.
+           Each panel is exactly one viewport wide. The outgoing tab sits at -x
+           and the incoming at width - x, so the pair tiles the screen at every
+           offset in the gesture and there is no gap between them at any point. A
+           dim behind them is therefore covered on every frame. The scale was
+           what opened the gap, by making each panel 23px narrower; the moment it
+           went, the scrim became a full-screen fixed element that could never be
+           seen — live code that cannot succeed, which reads to the next person
+           as a working feature. This project has shipped that exact shape twice
+           before and named it both times.
 
-           NO BORDER RADIUS. Same geometry, and it renders nothing at all: the
-           top corners are off screen except at the very top of the list, the
-           bottom corners are a million pixels below the viewport. It would also
-           require `overflow: hidden` to clip the cards to it — a real
-           containing-block change bought for something almost never visible.
+           Do not restore one without first restoring something for it to show
+           through. And note that the obvious way to do that — parking the
+           incoming tab a fixed distance further out so a seam tracks the thumb —
+           is what the removed `box-shadow` already rendered as, and it was
+           removed for reading as noise. */
 
-           What remains does the work: the scale (`--tab-lift`, composed into the
-           same `transform` as the offset so the two cannot fight) makes each tab
-           narrower than the viewport, which opens the gap between them, and the
-           scrim below shows the page they have been lifted off. */
+        /* A floor, not a lid. A positioned element with `z-index: auto` paints
+           in document order, so this keeps both pinned tabs above ordinary page
+           content for the gesture's duration. It is well below `--z-chrome`: the
+           header is the app's frame and stays where it is.
 
-        /* The surface behind the lifted tab: what it is lifted OFF.
-
-           A pseudo-element on the root rather than a real node — nothing else
-           needs to know it exists, and it must not live inside either tab.
-
-           It ranks BELOW the tabs and below `--z-chrome`. The header is the
-           app's frame and stays lit; this dims the page the grids sit on, which
-           is what becomes visible in the gap as the outgoing tab moves aside.
-           That gap is the only place a scrim can read during this gesture, and
-           it is enough. */
-        .tab-dragging::after {
-            content: '';
-            position: fixed;
-            inset: 0;
-            background: var(--tab-drag-scrim);
-            pointer-events: none;
-            z-index: 0;
-        }
-
-        /* Above the scrim, below the header. Both are needed: a positioned
-           element with `z-index: auto` paints in DOM order, and `html::after`
-           comes after `body`, so without this the scrim would paint over the
-           very tabs it exists to sit behind.
-
-           The two tabs share this value, and that is safe ONLY because they no
-           longer overlap — they sit a full viewport apart. It was not safe when
+           The two tabs share this value, and that is safe ONLY because they do
+           not overlap — they sit a full viewport apart. It was not safe when
            the incoming tab parked a third of a viewport out: equal z-index means
            document order decides, `#tvshows-content` comes second, and TV Shows
            therefore painted over Movies in both directions. If anything ever
@@ -2534,7 +2533,6 @@
 
         const TAB_TRANSITION_MS = readToken('--dur-tab', 280);
         const TAB_SETTLE_MIN_MS = readToken('--dur-tab-settle-min', 120);
-        const TAB_LIFT = readToken('--tab-drag-lift', 0.94);
 
         /* Where the gesture is claimed. Small enough to precede a scroll, large
            enough that a tap's jitter does not trip it.
@@ -2611,13 +2609,16 @@
                     'tab-leaving', 'tab-entering', 'tab-pinned', 'tab-sliding'
                 );
                 panel.style.removeProperty('--tab-shift');
-                panel.style.removeProperty('--tab-lift');
-                panel.style.removeProperty('--tab-origin-y');
                 panel.style.removeProperty('--dur-tab-settling');
+                /* All three of the pinned box, not just `top`. A tab left with
+                   an inline `width` is a grid that keeps the column count it
+                   had during the gesture, through every resize after it. */
                 panel.style.removeProperty('top');
+                panel.style.removeProperty('left');
+                panel.style.removeProperty('width');
             }
 
-            document.documentElement.classList.remove('tab-transitioning', 'tab-dragging');
+            document.documentElement.classList.remove('tab-transitioning');
 
             /* An abandoned drag has to put the viewer back where they were.
 
@@ -2645,8 +2646,9 @@
         /* Take both tabs out of the scroller and render the incoming one.
 
            Shared by the drag and by a slide from rest, so the freeze exists in
-           exactly one place. `lifted` is the only difference between them: a
-           drag raises the tabs off the page, a slide from rest does not.
+           exactly one place. They differ in nothing here: a drag used to also
+           raise the tabs off the page, and that lift is gone, so both paths now
+           freeze identically and differ only in what moves them afterwards.
 
            Returns the record, with the incoming tab rendered, both panels
            pinned, and NOTHING yet moved.
@@ -2659,39 +2661,28 @@
            itself is free (59.9fps on a 1,228,722px box, zero dropped frames), so
            a hitch here reads as "the slide is janky" and the transform takes the
            blame. Do not add a measurement to this function. */
-        /* Pin a tab at `viewportTop`, and anchor its scale to what is ON SCREEN.
+        /* Pin a tab at `viewportTop` on screen, IN ITS OWN BOX.
          *
-         * THE TRANSFORM ORIGIN IS THE WHOLE OF THIS FUNCTION, and getting it
-         * wrong is not subtle. `transform-origin` defaults to an element's own
-         * centre. A tab holding 7,000 items is 1,227,442px tall, so its centre
-         * is some 600,000px below the viewport — and scaling by 0.94 about a
-         * point that far away moves its top edge down by height x 0.03:
+         * All three of these are written, and `left`/`width` are the ones easily
+         * mistaken for stylesheet constants. A fixed element does not inherit
+         * `.container`'s padding, so a tab pinned with `left: 0; right: 0` is
+         * the viewport's width rather than its own — measured at +20px, which
+         * `auto-fill` hands to the cards. The grid grew when a thumb landed and
+         * shrank when it lifted. The lift's scale used to cancel that almost
+         * exactly, which is why it took the lift's removal to see it.
          *
-         *     measured, 7,000 movies:  the first card jumped +36,791px
-         *
-         * The grid simply left the screen downward the instant a thumb touched
-         * it. Worse, the displacement is proportional to LIBRARY SIZE, so the
-         * 7,000-item tab vanished while the 1,200-item one barely moved — which
-         * presents as "it always shows the TV Shows grid whichever way I swipe",
-         * a routing bug that does not exist.
-         *
-         * So the origin is the centre of the VIEWPORT, expressed in the
-         * element's own coordinates: the element's top edge sits at `viewportTop`
-         * on screen, so the viewport's middle is `middle - viewportTop` down from
-         * that edge. The tab then shrinks around what the viewer is looking at,
-         * which is also the only part of it they can see.
-         *
-         * `CLAUDE.md` warned that a scale moves `getBoundingClientRect().top`.
-         * That was read here as an arithmetic hazard for the grid's windowing —
-         * it is also, and much more urgently, a VISIBLE one. The windowing guard
-         * was necessary and it was not sufficient.
+         * `viewportTop` and `left` come from the caller's single pre-write rect.
+         * The lesson from the origin this used to set outlives that code: on a
+         * panel as tall as the whole library, what a transform or a pin does to
+         * the PICTURE is the first question, not the last.
          */
-        function pinTab(panel, viewportTop, middle) {
+        function pinTab(panel, viewportTop, left, width) {
             panel.style.top = `${viewportTop}px`;
-            panel.style.setProperty('--tab-origin-y', `${middle - viewportTop}px`);
+            panel.style.left = `${left}px`;
+            panel.style.width = `${width}px`;
         }
 
-        function beginTabTransition(contentName, outgoing, incoming, lifted) {
+        function beginTabTransition(contentName, outgoing, incoming) {
             // Anything still in flight is resolved before a new one starts.
             endTabTransition();
 
@@ -2709,8 +2700,8 @@
                forces a synchronous re-layout. The rule is not "never measure",
                it is "never measure something you just invalidated" — so this
                must stay above every write in this function. */
-            const contentTop = outgoing.getBoundingClientRect().top + y;
-            const viewportMiddle = window.innerHeight / 2;
+            const box = outgoing.getBoundingClientRect();
+            const contentTop = box.top + y;
 
             const record = {
                 outgoing,
@@ -2765,9 +2756,15 @@
                Both offsets are measured from `contentTop`, not from zero. The
                outgoing tab renders exactly where it already was; the incoming
                one shows its own top, which is `contentTop` with the page at 0. */
-            pinTab(outgoing, contentTop - y, viewportMiddle);
+            pinTab(outgoing, contentTop - y, box.left, box.width);
             outgoing.classList.add('tab-leaving');
-            pinTab(incoming, contentTop, viewportMiddle);
+            /* The incoming tab takes the OUTGOING one's box, not its own. It is
+               display:none at this instant, so it has no box of its own to
+               read — and measuring it after the render above would be a forced
+               layout on the gesture's first frame, the 77.7ms this function
+               exists to avoid. They are siblings in the same container, so the
+               box is the same one. */
+            pinTab(incoming, contentTop, box.left, box.width);
             incoming.classList.add('tab-entering', 'tab-pinned');
 
             /* Both tabs are out of the scroller and the incoming one is off
@@ -2792,12 +2789,6 @@
                its own. Measured before this argument existed: the page was still
                at 3000px two frames in and settled at 12px, not 0. */
             window.GlimpseOverlays.scrollPageTo(0, 'instant');
-
-            if (lifted) {
-                document.documentElement.classList.add('tab-dragging');
-                outgoing.style.setProperty('--tab-lift', TAB_LIFT);
-                incoming.style.setProperty('--tab-lift', TAB_LIFT);
-            }
 
             return record;
         }
@@ -2830,7 +2821,7 @@
         }
 
         function switchTabAnimated(contentName, outgoing, incoming, direction) {
-            const record = beginTabTransition(contentName, outgoing, incoming, false);
+            const record = beginTabTransition(contentName, outgoing, incoming);
 
             // Which way the grids travel. A swipe left sends the outgoing tab
             // left and brings the incoming one in from the right.
@@ -2898,8 +2889,8 @@
            always going the same way.
 
            Edge to edge, the question cannot arise: the tabs move together, one
-           leaving exactly as fast as the other arrives, with the lift's scale
-           opening a small gap between them so they read as two cards. */
+           leaving exactly as fast as the other arrives, and they tile the
+           viewport rather than sharing any part of it. */
         function parkOffset(direction, width) {
             return (direction === 'forward' ? 1 : -1) * width;
         }
@@ -2912,7 +2903,7 @@
                of, so the whole setup is skipped and only the outgoing tab is
                taken out of the scroller. */
             const record = incoming
-                ? beginTabTransition(contentName, outgoing, incoming, true)
+                ? beginTabTransition(contentName, outgoing, incoming)
                 : beginResistedDrag(outgoing);
 
             record.drag = {
@@ -2934,14 +2925,14 @@
             return record;
         }
 
-        /* The resisted case: one tab, pinned and lifted, with nothing to arrive.
+        /* The resisted case: one tab, pinned, with nothing to arrive.
            It shares the record shape so one teardown serves both. */
         function beginResistedDrag(outgoing) {
             endTabTransition();
             const y = window.scrollY;
             // Read before any write, exactly as in beginTabTransition().
-            const contentTop = outgoing.getBoundingClientRect().top + y;
-            const viewportMiddle = window.innerHeight / 2;
+            const box = outgoing.getBoundingClientRect();
+            const contentTop = box.top + y;
             const record = {
                 outgoing,
                 incoming: null,
@@ -2954,10 +2945,9 @@
             };
             tabTransition = record;
 
-            document.documentElement.classList.add('tab-transitioning', 'tab-dragging');
-            pinTab(outgoing, contentTop - y, viewportMiddle);
+            document.documentElement.classList.add('tab-transitioning');
+            pinTab(outgoing, contentTop - y, box.left, box.width);
             outgoing.classList.add('tab-leaving');
-            outgoing.style.setProperty('--tab-lift', TAB_LIFT);
             return record;
         }
 
@@ -3065,13 +3055,13 @@
             const target = commit ? (drag.direction === 'forward' ? -drag.width : drag.width) : 0;
             const duration = settleDuration(target - drag.offset, drag.width);
 
-            /* The gesture is over: the tabs are being put down, so the lift
-               releases over the same movement that carries them home. */
+            /* The finger is off the glass, so the tabs stop tracking it and
+               start animating: `.tab-sliding` is what carries them home, over a
+               duration set from the distance still to travel. */
             for (const panel of [outgoing, incoming]) {
                 if (!panel) continue;
                 panel.style.setProperty('--dur-tab-settling', `${duration}ms`);
                 panel.classList.add('tab-sliding');
-                panel.style.setProperty('--tab-lift', '1');
             }
 
             if (commit) {
@@ -3929,20 +3919,27 @@
         function updateGridWindow(view) {
             /* Not while the tabs are mid-gesture.
 
-               The window is derived from `getBoundingClientRect().top`, and the
-               drag's lift applies a scale — which moves that top for every card
-               in the grid. A window computed now would be computed against a
-               position the viewer never occupied, and it would present as an
-               off-by-one in the grid rather than as anything to do with a
-               transform.
+               The window is derived from `getBoundingClientRect().top`, and a
+               tab in a gesture is pinned out of the scroller at a CAPTURED
+               offset — where the viewer was when the gesture began, or, for the
+               incoming tab, its own top. Neither is the page's scroll position.
+               A window computed now would be computed against a position the
+               viewer never occupied, and it would present as an off-by-one in
+               the grid rather than as anything to do with the transition.
 
-               THIS IS THE SAFETY. It is not the fact that a tab pinned with
-               `position: fixed` receives no scroll events — that is true today,
-               it is a consequence of the freeze rather than a property of the
-               lift, and a safety implied by a mechanism disappears the moment
-               the mechanism changes. This project has already shipped a pair of
-               conditions that were meant to be one and drifted; an explicit
-               refusal cannot drift from itself. */
+               THIS REFUSAL PREDATES THE THING IT WAS WRITTEN FOR AND OUTLIVES
+               IT. It went in when the drag also scaled the tabs, which moved
+               that same measured top; the scale is gone and this is not. It
+               stands on the freeze, which is not going anywhere: the freeze is
+               what makes the gesture possible at all.
+
+               It is also NOT the fact that a tab pinned with `position: fixed`
+               receives no scroll events. That is true today, it is a
+               consequence of the freeze rather than a rule anyone stated, and a
+               safety implied by a mechanism disappears the moment the mechanism
+               changes. This project has already shipped a pair of conditions
+               that were meant to be one and drifted; an explicit refusal cannot
+               drift from itself. */
             if (tabGestureActive()) return;
 
             if (!view || view.data.length === 0 || view.rowPitch <= 0) return;

@@ -226,9 +226,10 @@ def test_the_transition_translates_horizontally_only(index):
     re-windows the grid against a position the viewer never occupied. It presents
     as an off-by-one in the window, not as a layout bug.
 
-    The lift's scale is the one exception and it is checked separately below --
-    it moves that top exactly as a translateY would, and is admissible only
-    because the windowing refuses outright for the gesture's duration.
+    There is NO exception. A scale was one for a while -- the drag's lift -- and
+    it moved that top exactly as a translateY would, on top of being visible to
+    the viewer as the grid dropping. It is gone, and so is the caveat that used
+    to live in this docstring.
     """
     rule = css_rule(index, '.content.tab-leaving,\n        .content.tab-entering')
     assert 'translateX(' in rule, 'the tabs do not translate horizontally'
@@ -239,26 +240,25 @@ def test_the_transition_translates_horizontally_only(index):
         )
 
 
-def test_the_lift_is_paired_with_a_windowing_refusal(index):
-    """The scale and the guard arrive together or neither does.
+def test_the_windowing_refusal_stands_on_its_own(index):
+    """The refusal outlives the scale it was written for.
 
-    A scale moves every card's getBoundingClientRect().top, which is
-    firstVisibleRow()'s only input. It is admissible ONLY because
-    updateGridWindow() refuses while a gesture is live.
+    updateGridWindow() must decline while a tab gesture is live. That went in
+    when the drag scaled the moving tabs -- a scale moves every card's
+    getBoundingClientRect().top, which is firstVisibleRow()'s only input -- and
+    it was framed as one half of a pair.
 
-    This asserts the pairing rather than either half, because either half alone
-    is the defect: a scale without the guard re-windows the grid against a
-    position the viewer never occupied, and this repo has already shipped two
-    conditions meant to describe one capability that drifted apart.
+    The scale is gone and this is NOT. A tab in a gesture is pinned out of the
+    scroller at a captured offset, so its measured top is not the page's scroll
+    position either way. This test is deliberately unconditional: its previous
+    form returned early when it found no scale in the stylesheet, which would
+    have made it pass while testing nothing the moment the lift was removed --
+    and removing the lift is exactly when someone reads this guard as orphaned.
     """
-    rule = css_rule(index, '.content.tab-leaving,\n        .content.tab-entering')
-    if 'scale(' not in rule:
-        return  # No lift, no guard needed.
-
     body = function_body(index, 'updateGridWindow')
     assert re.search(r'if\s*\(tabGestureActive\(\)\)\s*return', body), (
-        'the tabs scale during a gesture but updateGridWindow() does not refuse '
-        'while one is live -- the window would be computed against a scaled rect'
+        'updateGridWindow() does not refuse while a tab gesture is live -- the '
+        'window would be computed from a tab pinned at a captured offset'
     )
     assert body.index('tabGestureActive()') < body.index('rowPitch'), (
         'the windowing guard runs after the geometry checks rather than first'
@@ -598,11 +598,14 @@ def test_the_settle_is_timed_from_the_distance_remaining(index, tokens):
 
 
 def test_the_drag_numbers_live_in_tokens(index, tokens):
-    """Two files must agree about the lift, so one of them owns it."""
-    for token in ('--tab-drag-lift:', '--tab-drag-scrim:', '--dur-tab-settle-min:'):
-        assert token in tokens, f'tokens.css does not declare {token}'
-    assert "readToken('--tab-drag-lift'" in index, (
-        'index.html restates the lift instead of reading it from the token'
+    """Two files must agree about the settle floor, so one of them owns it.
+
+    This used to guard the lift's two tokens as well. They are gone, and their
+    absence is asserted by the test that removed the lift rather than here.
+    """
+    assert '--dur-tab-settle-min:' in tokens, 'tokens.css does not declare --dur-tab-settle-min:'
+    assert "readToken('--dur-tab-settle-min'" in index, (
+        'index.html restates the settle floor instead of reading it from the token'
     )
 
 
@@ -639,34 +642,57 @@ def test_the_tabs_move_edge_to_edge_and_never_overlap(index, tokens):
     )
 
 
-def test_the_lift_is_a_scale_and_a_scrim_only(index, tokens):
-    """Both other ingredients of a "raised card" were tried here and removed.
+def test_a_dragged_tab_is_moved_and_nothing_else(index, tokens):
+    """FOUR ways of raising these panels were tried. All four are gone.
 
-    One reason covers both, and it is the first fact about these panels: they are
-    as tall as the whole library, so only one viewport of each is ever on screen
-    and neither end of them is.
+    The scale is the one that shipped, and it is why this test now reads in the
+    other direction. Anchored to the viewport's midpoint, it pulled everything
+    above that midpoint down toward it -- ~23px on a phone, arriving the instant
+    the gesture was claimed and reversing on release. It was reported as the
+    grid dropping when you swipe, which is exactly what it was: vertical motion
+    in a gesture that means nothing but horizontal.
 
-    A box-shadow therefore renders only as a blurred band down each vertical
-    edge -- top and bottom are far off screen -- and with the tabs 24px apart,
-    two of those bands sit in the gap at once. Reported as distracting, which is
-    what it was: noise tracking the thumb. A border-radius renders nothing at
-    all, and would additionally need `overflow: hidden` to clip cards to it.
+    The scrim went with it rather than surviving it. Each panel is one viewport
+    wide, so unscaled the pair tiles the screen at every offset and a dim behind
+    them is covered on every frame. Kept, it would be a full-screen fixed
+    element that can never be seen -- live code that cannot succeed, which reads
+    to the next person as a working feature.
 
-    The scale does the visible work: it makes each tab narrower than the
-    viewport, which is what opens the gap between them.
+    The shadow and the radius never shipped, and their reason is the first fact
+    about these panels: they are as tall as the whole library, so only one
+    viewport of one is ever on screen and neither of its ends is. A box-shadow
+    renders as a blurred band down each vertical edge tracking the thumb; a
+    border-radius renders nothing at all.
+
+    The obvious way to bring the scrim back -- parking the incoming tab further
+    out so a seam tracks the thumb -- is what the shadow already rendered as.
     """
-    for gone in ('--tab-drag-elevation', 'box-shadow: var(--tab-drag'):
-        assert gone not in index and gone not in tokens, (
-            f'{gone} is back -- on a panel 1,227,442px tall a shadow is a band '
-            f'down each edge following the thumb, and two of them land in the '
-            f'gap between the tabs'
-        )
-    assert 'tab-lifted' not in index, (
-        'the .tab-lifted class is back but the lift is a scale and a scrim; an '
-        'empty class is a hook for exactly the declarations that were removed'
+    rule = css_rule(index, '.content.tab-leaving,\n        .content.tab-entering')
+    assert 'scale(' not in rule, (
+        'the tabs are scaled again. A scale about the viewport midpoint moves '
+        'the visible grid DOWN ~23px on a phone the instant the gesture is '
+        'claimed; it shipped once and was reported as the grid dropping'
     )
-    assert '--tab-drag-lift:' in tokens, 'the lift scale token is gone'
-    assert '--tab-drag-scrim:' in tokens, 'the scrim token is gone'
+    assert 'transform-origin' not in rule, (
+        'transform-origin is back on a rule that only translates, where it does '
+        'nothing -- either a scale returned with it or this is a dead '
+        'declaration, and both are defects'
+    )
+    for prop in ('box-shadow', 'border-radius'):
+        assert prop not in rule, (
+            f'{prop} is on the tab rule -- on a panel 1,227,442px tall a shadow '
+            f'is a band down each edge following the thumb and a radius renders '
+            f'nothing at all'
+        )
+    for gone in ('--tab-drag-lift', '--tab-drag-scrim', '--tab-drag-elevation'):
+        assert gone not in index and gone not in tokens, (
+            f'{gone} is back. The lift was removed whole; a token is where it comes back from'
+        )
+    for gone in ('tab-lifted', 'tab-dragging'):
+        assert gone not in index, (
+            f'the .{gone} class is back. A drag adds no class of its own now -- '
+            f'an empty one is a hook for exactly what was removed'
+        )
 
 
 def test_the_drag_is_gated_with_the_gesture_not_a_breakpoint(index):
@@ -700,10 +726,11 @@ def test_teardown_clears_everything_the_drag_sets(index):
     body = function_body(index, 'endTabTransition')
     for cls in ('tab-leaving', 'tab-entering', 'tab-pinned', 'tab-sliding'):
         assert cls in body, f'the teardown does not clear {cls}'
-    for prop in ('--tab-shift', '--tab-lift', '--dur-tab-settling', 'top'):
+    for prop in ('--tab-shift', '--dur-tab-settling', 'top'):
         assert prop in body, f'the teardown does not clear {prop}'
-    for root in ('tab-transitioning', 'tab-dragging'):
-        assert root in body, f'the teardown does not clear {root} from the root'
+    assert 'tab-transitioning' in body, (
+        'the teardown does not clear tab-transitioning from the root'
+    )
     assert 'cancelAnimationFrame' in body, (
         "the teardown leaves the tracker's pending frame scheduled, so one more "
         'write lands after everything it writes to has been cleared'
@@ -730,44 +757,38 @@ def test_an_abandoned_drag_restores_the_scroll_after_unpinning(index):
     )
 
 
-def test_a_scaled_tab_anchors_its_origin_to_the_viewport(index):
-    """THIS ONE SHIPPED. It reached the user and it was not subtle.
+def test_a_pinned_tab_is_positioned_and_not_transformed_in_any_other_way(index):
+    """The scale that made this necessary SHIPPED, twice broken.
 
     `transform-origin` defaults to the element's own centre. A tab holding 7,000
     items is 1,227,442px tall, so its centre is ~600,000px below the screen, and
-    scaling by 0.94 about a point that far away moves its top edge down by
-    height x 0.03. Measured on the build that shipped to :dev, the first card
-    jumped +36,791px the instant a thumb touched it -- the grid left the screen
-    downward.
+    scaling by 0.94 about a point that far away moved its top edge down by
+    height x 0.03: the first card jumped +36,791px the instant a thumb touched
+    it, and the grid left the screen downward.
 
-    The second symptom is what makes this worth a test rather than a comment.
-    The displacement is proportional to LIBRARY SIZE, so the 7,000-item tab
-    vanished while the 1,200-item one barely moved, and it presented as "it
-    always shows the TV Shows grid whichever way I swipe" -- a routing bug that
-    did not exist. Two reports, one cause, and the plausible one was wrong.
+    The displacement was proportional to LIBRARY SIZE, so the 7,000-item tab
+    vanished while the 1,200-item one barely moved -- it presented as "it always
+    shows the TV Shows grid whichever way I swipe", a routing bug that did not
+    exist. Anchoring the origin to the viewport fixed that, and left a smaller
+    version of the same thing: ~23px of drop on every phone, which is what was
+    finally reported and what removed the scale.
 
-    Nothing in the source pinned this. The windowing guard was in place and
-    correct, and it addressed the arithmetic hazard of a moved rect while the
-    VISIBLE hazard went unconsidered.
+    So pinTab() sets a position and nothing else, and the lesson survives the
+    code that taught it: a transform on a panel this tall is a VISIBLE hazard
+    before it is an arithmetic one. The windowing guard was in place and correct
+    throughout and did nothing for either symptom.
     """
     rule = css_rule(index, '.content.tab-leaving,\n        .content.tab-entering')
-    if 'scale(' not in rule:
-        return  # No scale, no origin to get wrong.
-
-    assert 'transform-origin' in rule, (
-        'the tabs are scaled with no transform-origin, so the scale is about '
-        'the element centre -- hundreds of thousands of pixels below the '
-        'viewport at library scale. The grid drops off the bottom of the screen.'
-    )
-    assert '--tab-origin-y' in rule, (
-        'the transform-origin is a constant; it has to be computed per gesture '
-        'from where the pinned tab actually sits on screen'
+    assert 'transform-origin' not in rule, (
+        'a transform-origin is back on the tab rule. A translate is '
+        'origin-independent, so either this is dead or a scale returned with it'
     )
 
     body = function_body(index, 'pinTab')
-    assert '--tab-origin-y' in body and 'style.top' in body, (
-        'pinTab() does not set both the offset and the origin -- they are one '
-        'decision and a tab pinned without its origin is the shipped bug'
+    assert 'style.top' in body, 'pinTab() does not pin the tab'
+    assert 'transform' not in body, (
+        'pinTab() writes a transform. It sets a position; the gesture sets the '
+        'offset, and nothing else may be applied to a panel this tall'
     )
 
 
@@ -786,6 +807,58 @@ def test_a_pinned_tab_is_offset_by_its_own_position_not_zero(index):
         'the incoming tab is not pinned at its own position, so it renders '
         'under the header instead of below it'
     )
+
+
+def test_a_pinned_tab_keeps_its_own_horizontal_box(index):
+    """A fixed element does not inherit its container's padding.
+
+    `left: 0; right: 0` -- which these rules said -- spans a pinned tab across
+    the whole viewport, so claiming a gesture WIDENED the grid by both of
+    `.container`'s paddings and released it back: measured at +20px, which
+    `auto-fill` spends on the cards, ~10px each at two columns.
+
+    That predates the drag and had never been seen, because the lift's
+    `scale(0.94)` shrank the over-wide tab back to within 2px of its in-flow
+    width. One accident cancelled another, and removing the lift uncovered it --
+    which is the whole reason this test exists rather than a note. A grid that
+    changes size when a thumb lands is the same complaint as one that drops.
+
+    So the box is written inline from the rect the freeze already reads before
+    its first write. No second measurement: reading the incoming tab's own box
+    would be a forced layout on the gesture's opening frame, and it has none to
+    read anyway -- it is display:none until the class lands.
+    """
+    for selector in ('.content.tab-leaving,\n        .content.tab-entering.tab-pinned',):
+        rule = css_rule(index, selector)
+        assert 'position: fixed' in rule, 'the pinned tabs are not taken out of the scroller'
+        for banned in ('left:', 'right:', 'width:'):
+            assert banned not in rule, (
+                f'the pinned rule sets {banned} in the stylesheet. A constant there is the '
+                f'viewport, not the tab -- the grid widens by the container padding on claim'
+            )
+
+    body = function_body(index, 'pinTab')
+    for prop in ('style.top', 'style.left', 'style.width'):
+        assert prop in body, f'pinTab() does not write {prop} -- the pinned box is incomplete'
+
+    for name in ('beginTabTransition', 'beginResistedDrag'):
+        setup = function_body(index, name)
+        assert re.search(r'getBoundingClientRect\(\)', setup), f'{name}() reads no box at all'
+        assert setup.count('getBoundingClientRect()') == 1, (
+            f'{name}() measures more than once -- the box, the top and the width are one rect, '
+            f'and a second read after a write costs ~78ms on the opening frame'
+        )
+        assert re.search(r'box\.left,\s*box\.width', setup), (
+            f'{name}() pins without passing the measured box, so the tab is pinned at the '
+            f"viewport's width rather than its own"
+        )
+
+    teardown = function_body(index, 'endTabTransition')
+    for prop in ("removeProperty('top')", "removeProperty('left')", "removeProperty('width')"):
+        assert prop in teardown, (
+            f'the teardown does not clear {prop}; an inline width outlives the gesture and '
+            f'freezes the column count through every resize after it'
+        )
 
 
 def test_the_first_load_swipe_tip_is_present(index):
