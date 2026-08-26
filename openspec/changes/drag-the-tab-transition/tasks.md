@@ -248,9 +248,25 @@ Two environment notes for whoever runs this next, neither of them project bugs:
       turns out to be needed, run `make docker-smoke` before pushing.
       *Confirmed none was needed — the change is `web/`, `tests/` and `tools/`
       only, so the image is untouched and `make docker-smoke` does not apply.*
-- [ ] 8.10 Validate on a real phone: the lift's scale against real artwork, the
+- [x] 8.10 Validate on a real phone: the lift's scale against real artwork, the
       scrim's target, the flick floor, and whether the header's tab highlight
       should follow the drag or wait for the commit. These are the design's open
       questions and a thumb is the only instrument for them.
-      **Outstanding — needs the `:dev` image and the user's hands. Do not
-      archive before this.**
+      *Done, over four rounds on `:dev`. It found three defects the CDP
+      verification did not, and all three are now pinned by regression tests:*
+      - *The lift's `scale` about the default `transform-origin` threw the grid
+        **+36,791px** down — and because the displacement scales with library
+        size, it presented as "it always shows the TV Shows grid", a routing bug
+        that did not exist.*
+      - *The parallax made the two tabs overlap, so document order decided which
+        was drawn on top: TV Shows over Movies in **both** directions. The tabs
+        are edge to edge now and there is no ratio token.*
+      - *The render signature ignored where the rendered window sat, so a tab
+        scrolled and returned to showed its spacer — a blank grid until you
+        scrolled four thousand pixels down.*
+
+      *Settled by the same rounds: the elevation is gone (on a panel this tall a
+      shadow is only a band down each edge, and two of them land in the gap
+      between the tabs); the first-load swipe tip stays; and the row-phase
+      mismatch when dragging away from a scrolled tab is a decision rather than
+      a defect — see `design.md`.*
