@@ -99,7 +99,12 @@ Z_MODAL = 55
 # that happen to have a z-index — a value that only orders siblings inside a
 # positioned ancestor (`.modal-header`, `.trailer-loading`, `.search-clear`)
 # never competes with an overlay and is not this test's business.
-CHROME_SELECTORS = ('.header', '.scroll-to-top', '.swipe-indicator')
+#
+# `.swipe-indicator` was here until the tab drag replaced it. It was a toast
+# announcing which tab a committed swipe had landed on, and a first-load tip
+# teaching the gesture; a drag that follows the thumb and springs back is both
+# of those, delivered by being used.
+CHROME_SELECTORS = ('.header', '.scroll-to-top')
 
 
 def test_layering_tokens_hold_their_order(tokens):
@@ -222,8 +227,12 @@ def test_scroll_from_inside_an_overlay_goes_through_the_overlay_system(index):
         'function switchTab(contentName, direction) {',
         # The animated tab path scrolls to the top of the incoming tab too, and
         # does it while an overlay may still be closing, so it is bound by this
-        # exactly as the instant path is.
-        'function switchTabAnimated(contentName, outgoing, incoming, direction) {',
+        # exactly as the instant path is. Both of its scrolls live in the shared
+        # setup and the shared teardown rather than in `switchTabAnimated()`:
+        # the drag and the slide from rest use one freeze, and an abandoned drag
+        # scrolls BACK from that teardown.
+        'function beginTabTransition(contentName, outgoing, incoming, lifted) {',
+        'function endTabTransition() {',
     ):
         body = block_after(index, opener)
         assert 'window.scrollTo(' not in body, (

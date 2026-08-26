@@ -22,6 +22,33 @@
     // Every overlay root. The scroll lock and focus manager both scan these.
     const OVERLAY = '.sheet, .modal';
 
+    /* Is anything open right now?
+     *
+     * An overlay that is transitioning out does not count. Alpine keeps the
+     * element displayed for the length of the leave animation, so without this
+     * the page stays pinned for an extra beat after every dismissal — the user
+     * closes an overlay, flicks to scroll, and the first flick is swallowed. The
+     * class is the same one that makes a dying overlay stop taking clicks.
+     *
+     * Exported, because the tab drag needs exactly this question answered before
+     * it claims a touch, and the alternative is a second implementation. A list
+     * of overlay names in index.html would be a registry by another route: it
+     * has to be updated when an overlay is added, and forgetting is silent —
+     * the new overlay opens, and a swipe across it drags the library behind it.
+     */
+    function anyOverlayOpen() {
+        const overlays = document.querySelectorAll(OVERLAY);
+        for (let i = 0; i < overlays.length; i++) {
+            if (overlays[i].style.display === 'none') continue;
+            if (overlays[i].classList.contains('overlay-closing')) continue;
+            return true;
+        }
+        return false;
+    }
+
+    window.GlimpseOverlays = window.GlimpseOverlays || {};
+    window.GlimpseOverlays.anyOverlayOpen = anyOverlayOpen;
+
     /* ----------------------------------------------------------------------
        Drag to dismiss
 
@@ -127,22 +154,6 @@
         let locked = false;
         let queued = false;
 
-        // An overlay that is transitioning out does not count. Alpine keeps the
-        // element displayed for the length of the leave animation, so without
-        // this the page stays pinned for an extra beat after every dismissal —
-        // the user closes an overlay, flicks to scroll, and the first flick is
-        // swallowed. The class is the same one that makes a dying overlay stop
-        // taking clicks.
-        function anyOverlayOpen() {
-            const overlays = document.querySelectorAll(OVERLAY);
-            for (let i = 0; i < overlays.length; i++) {
-                if (overlays[i].style.display === 'none') continue;
-                if (overlays[i].classList.contains('overlay-closing')) continue;
-                return true;
-            }
-            return false;
-        }
-
         function sync() {
             queued = false;
             const open = anyOverlayOpen();
@@ -226,7 +237,6 @@
             }
         }
 
-        window.GlimpseOverlays = window.GlimpseOverlays || {};
         window.GlimpseOverlays.scrollPageTo = scrollPageTo;
 
         function schedule() {

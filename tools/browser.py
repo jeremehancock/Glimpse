@@ -42,6 +42,23 @@ import websocket
 DEFAULT_PORT = 9333
 
 
+def _exception_text(details: dict) -> str:
+    """The actual error, not the word 'Uncaught'.
+
+    `exceptionDetails.text` is almost always the bare string 'Uncaught', which
+    says only that something threw. The message and stack live one level down in
+    `exception.description`, and without them a failing probe reports the same
+    thing whatever went wrong — a typo, a renamed function and a real regression
+    are indistinguishable. That is worth exactly nothing when the probe IS the
+    verification.
+    """
+    exception = details.get('exception') or {}
+    description = exception.get('description') or exception.get('value')
+    line = details.get('lineNumber')
+    where = f' (line {line + 1})' if isinstance(line, int) else ''
+    return f'{description or details.get("text", "evaluate failed")}{where}'
+
+
 class Browser:
     """A Chromium instance with one page target attached.
 
@@ -120,7 +137,7 @@ class Browser:
             returnByValue=True,
         )
         if 'exceptionDetails' in result:
-            raise AssertionError(result['exceptionDetails'].get('text', 'evaluate failed'))
+            raise AssertionError(_exception_text(result['exceptionDetails']))
         return result['result'].get('value')
 
     def goto(self, url: str, settle: float = 5.0) -> None:
@@ -190,6 +207,92 @@ class Browser:
               }};
             }})()""",
             await_promise=False,
+        )
+
+    def touch(self, kind: str, x: float, y: float) -> None:
+        """One touch event at one point.
+
+        `kind` is 'touchStart', 'touchMove', 'touchEnd' or 'touchCancel'. An end
+        and a cancel carry no touch points — CDP rejects them if given any, which
+        reads as a malformed-parameter error rather than as the API's shape.
+
+        Touch emulation must be on or the page receives nothing and the run
+        reports a gesture that did not fire as a gesture that did nothing.
+        `viewport()` enables it below 768px.
+        """
+        points = [] if kind in ('touchEnd', 'touchCancel') else [{'x': x, 'y': y}]
+        self.send('Input.dispatchTouchEvent', type=kind, touchPoints=points)
+
+    def drag(
+        self,
+        path: list[tuple[float, float]],
+        probe: str,
+        settle: float = 0.6,
+        cancel: bool = False,
+    ) -> list[dict]:
+        """Dispatch a touch path and sample `probe` after every move.
+
+        Returns one sample per point, plus one after the release, each a dict of
+        whatever `probe` evaluates to with the dispatched coordinates merged in.
+
+        SAMPLE THE PATH, NEVER A POINT. `transform !== 'none'` is satisfied by a
+        transition's START value, so it passes just as well for a slide that
+        never moves — and it did, in the first version of the tab transition's
+        verification. The same trap is worse for a drag: a drag's proof is that
+        the transform CORRESPONDS to the finger, not merely that it changed. A
+        handler that set a constant offset on the first move would pass any
+        single-point check ever written.
+
+        So probe at each coordinate and compare against the coordinate. Include
+        a reversal in the path — a handler tracking `abs(delta)` follows a finger
+        perfectly in one direction and refuses to come back.
+        """
+
+        def read(**fixed: Any) -> dict:
+            sample = self.evaluate(probe, await_promise=False)
+            if not isinstance(sample, dict):
+                sample = {'value': sample}
+            return {**fixed, **sample}
+
+        two_frames = 'new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))'
+
+        samples: list[dict] = []
+        for index, (x, y) in enumerate(path):
+            self.touch('touchStart' if index == 0 else 'touchMove', x, y)
+            # Two frames, so the handler's rAF-coalesced write has landed AND
+            # been laid out. Reading sooner samples the frame before the one the
+            # move produced, which reads as a handler that lags the finger.
+            self.evaluate(two_frames)
+            samples.append(read(x=x, y=y))
+
+        last_x, last_y = path[-1]
+        self.touch('touchCancel' if cancel else 'touchEnd', last_x, last_y)
+        time.sleep(settle)
+        samples.append(read(x=last_x, y=last_y, released=True))
+        return samples
+
+    def frame_times(self, action: str, seconds: float = 1.0) -> list[float]:
+        """Run `action`, then report the gaps between frames while it plays out.
+
+        For "is this animation smooth" — the answer is the distribution, not the
+        mean. One 183ms frame among sixty 16.7ms ones is invisible in an average
+        and is the whole defect: it was two thirds of a 280ms slide, already over
+        before the animation became visible, and it read as a jump.
+        """
+        return self.evaluate(
+            f"""(() => new Promise(resolve => {{
+              const gaps = [];
+              let previous = performance.now();
+              const deadline = previous + {seconds * 1000};
+              function tick(now) {{
+                gaps.push(now - previous);
+                previous = now;
+                if (now < deadline) requestAnimationFrame(tick);
+                else resolve(gaps);
+              }}
+              {action};
+              requestAnimationFrame(tick);
+            }}))()"""
         )
 
     def close(self) -> None:
