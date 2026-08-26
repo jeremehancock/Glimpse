@@ -457,15 +457,34 @@ those tags.
     fade softens a grid appearing *in place*; a tab crossing the viewport is
     already a soft arrival, and the stagger was the largest cost on that frame.
   - **Horizontal translate only — and the lift's `scale` is the ONE exception,
-    which is a precondition rather than a loosening.** `firstVisibleRow()` reads
+    which costs TWO safeguards, not one.** `firstVisibleRow()` reads
     `getBoundingClientRect().top`, so a `translateY` or a scale re-windows the
-    grid mid-flight against a position the viewer never occupied — an
-    off-by-one in the window, not a layout bug. The scale is admissible only
-    because `updateGridWindow()` **refuses outright** while a gesture is live.
-    That guard and the scale arrive together; remove either and the other is a
-    bug. Do not substitute the fact that a pinned tab receives no scroll events
-    — that is true, and it is a consequence of the freeze rather than a property
-    of the lift, so it stops being a safety the moment the freeze changes.
+    grid mid-flight against a position the viewer never occupied.
+    1. `updateGridWindow()` **refuses outright** while a gesture is live. Do not
+       substitute the fact that a pinned tab receives no scroll events — that is
+       a consequence of the freeze, not a property of the lift.
+    2. **`transform-origin` must be the viewport centre in the element's own
+       coordinates**, set per gesture by `pinTab()`. This one shipped to a user.
+       The default origin is the element's own centre, and a tab holding 7,000
+       items is 1,227,442px tall — so scaling by 0.94 about a point ~600,000px
+       below the screen threw the first card **+36,791px** downward. The grid
+       left the screen the instant a thumb touched it.
+    - **The second symptom is the lesson.** The displacement scales with library
+      size, so the 7,000-item tab vanished while the 1,200-item one barely
+      moved, and it reported as *"it always shows the TV Shows grid whichever
+      way I swipe"* — a routing bug that did not exist. One cause, two
+      symptoms, and the plausible one was wrong.
+    - **A moved rect is an arithmetic hazard AND a visible one.** Guard 1 was
+      in place and correct and did nothing for this. Reasoning about a transform
+      only in terms of what it does to the *maths* is how the far larger problem
+      — what it does to the *picture* — went unconsidered.
+  - **The pinned tabs are offset by `contentTop`, never by `-scrollY` alone.**
+    `.content` starts below the header, and the header shrinks on scroll so it
+    is not a constant to hardcode. `beginTabTransition()` therefore takes one
+    `getBoundingClientRect()` — **before any write in that function**, against
+    layout the browser already computed, which is free. The ~78ms rule is *never
+    measure what you just invalidated*, not *never measure*; the test enforces
+    the ordering rather than banning the call.
   - **The axis locks at 8px, and that is not the commit distance.** They were one
     number and that is why nothing could move until the finger lifted: the old
     handler claimed the gesture only after 100px. Nothing can move before the
@@ -491,7 +510,14 @@ those tags.
   - **The lift declares no border-radius.** It is the obvious third ingredient
     after the scale and the shadow, and it would draw nothing: the frozen tab is
     pinned at the captured offset and is as tall as the whole library, so its
-    corners are never on screen.
+    corners are never on screen. That the panel is *enormous* is the same fact
+    behind the transform-origin bug above — when reasoning about the frozen
+    tabs, its height is the first thing to hold in mind, not the last.
+  - **The first-load swipe tip stays.** It was removed on the argument that a
+    drag demonstrates itself; it only demonstrates itself to someone who already
+    tries it, and the gesture has no visible affordance at rest. What is gone is
+    the *post-commit* toast naming the tab arrived at — the motion says that,
+    and says the direction too.
   - **`transform !== 'none'` does not prove a transition ran.** It is satisfied
     by the *start* value, so it passes for a slide that never moves — and it
     did, in the first version of this verification. Movement does not begin

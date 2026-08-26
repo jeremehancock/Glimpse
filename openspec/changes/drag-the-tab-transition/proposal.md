@@ -40,8 +40,10 @@ with their thumb. The grid should too.
 - **The committed settle keeps today's transition.** The freeze, the two-frame
   separation, the instant scroll reset and the idempotent teardown are all
   retained — the drag replaces what *starts* the slide, not the slide.
-- **The first-load swipe tip is dropped.** It teaches a gesture the viewer can
-  now discover by touching the screen, which is the only reason it was there.
+- **The first-load swipe tip stays.** It was dropped during implementation on
+  the reasoning that a drag demonstrates itself, and restored: it only
+  demonstrates itself to a viewer who already tries it, and the gesture has no
+  visible affordance at rest.
 
 Not in scope: per-tab scroll memory, a third tab, pointer drag on desktop, and
 any change to how items are filtered, sorted or windowed beyond the freeze.

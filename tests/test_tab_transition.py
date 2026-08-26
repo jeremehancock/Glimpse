@@ -89,26 +89,56 @@ def css_rule(source: str, selector: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def test_the_freeze_reads_no_geometry(index):
-    """Taking the outgoing tab out of flow is free; measuring it afterwards is not.
+PROBES = (
+    'getBoundingClientRect',
+    'offsetHeight',
+    'offsetTop',
+    'offsetWidth',
+    'getComputedStyle',
+)
 
-    Setting the frozen styles costs 0.2-0.4ms. A single getBoundingClientRect()
-    after doing so costs 77.7ms -- a forced synchronous layout landing on the
-    animation's opening frame. The transform itself is free, so the hitch reads
-    as "the slide is janky" and the transform takes the blame.
+
+def test_the_setup_measures_only_before_it_writes(index):
+    """The rule is not "never measure" -- it is "never measure what you invalidated".
+
+    Setting the frozen styles costs 0.2-0.4ms. A getBoundingClientRect() AFTER
+    doing so costs 77.7ms, a forced synchronous re-layout landing on the
+    gesture's opening frame. A read taken before any write in the same function
+    is against layout the browser already computed for the last frame, and costs
+    nothing.
+
+    The setup genuinely needs one measurement -- the tab's offset below the
+    header, which is not a constant because the header shrinks on scroll -- so
+    banning the call outright was wrong. Banning it after the first write is the
+    real constraint.
     """
-    body = function_body(index, 'beginTabTransition') + function_body(index, 'trackTabDrag')
-    for probe in (
-        'getBoundingClientRect',
-        'offsetHeight',
-        'offsetTop',
-        'offsetWidth',
-        'getComputedStyle',
-    ):
+    for name in ('beginTabTransition', 'beginResistedDrag'):
+        body = function_body(index, name)
+        writes = [
+            body.index(w) for w in ('classList.add', '.style.top', 'setProperty') if w in body
+        ]
+        assert writes, f'{name}() writes nothing -- it cannot be freezing anything'
+        first_write = min(writes)
+        for probe in PROBES:
+            position = body.find(probe)
+            if position == -1:
+                continue
+            assert position < first_write, (
+                f'{name}() calls {probe} AFTER it has written a style -- a forced '
+                f'layout there costs ~78ms on the first frame of every swipe'
+            )
+
+
+def test_the_tracker_measures_nothing_at_all(index):
+    """Per frame, sixty times a second, there is no safe moment to measure.
+
+    Everything the tracker needs was captured at lock: the origin, the width,
+    the scroll offset.
+    """
+    body = function_body(index, 'trackTabDrag')
+    for probe in PROBES:
         assert probe not in body, (
-            f'the setup or the tracker calls {probe} -- a forced layout '
-            f'between the freeze and the transform costs ~78ms on the first '
-            f'frame of every swipe, and the tracker would pay it every frame'
+            f'the tracker calls {probe} -- it would force a layout on every frame of the drag'
         )
 
 
@@ -653,4 +683,80 @@ def test_an_abandoned_drag_restores_the_scroll_after_unpinning(index):
     assert re.search(r"scrollPageTo\(restoreY,\s*'instant'\)", body), (
         'the restore is smooth, so an abandoned drag animates a correction that '
         'is supposed to be invisible'
+    )
+
+
+def test_a_scaled_tab_anchors_its_origin_to_the_viewport(index):
+    """THIS ONE SHIPPED. It reached the user and it was not subtle.
+
+    `transform-origin` defaults to the element's own centre. A tab holding 7,000
+    items is 1,227,442px tall, so its centre is ~600,000px below the screen, and
+    scaling by 0.94 about a point that far away moves its top edge down by
+    height x 0.03. Measured on the build that shipped to :dev, the first card
+    jumped +36,791px the instant a thumb touched it -- the grid left the screen
+    downward.
+
+    The second symptom is what makes this worth a test rather than a comment.
+    The displacement is proportional to LIBRARY SIZE, so the 7,000-item tab
+    vanished while the 1,200-item one barely moved, and it presented as "it
+    always shows the TV Shows grid whichever way I swipe" -- a routing bug that
+    did not exist. Two reports, one cause, and the plausible one was wrong.
+
+    Nothing in the source pinned this. The windowing guard was in place and
+    correct, and it addressed the arithmetic hazard of a moved rect while the
+    VISIBLE hazard went unconsidered.
+    """
+    rule = css_rule(index, '.content.tab-leaving,\n        .content.tab-entering')
+    if 'scale(' not in rule:
+        return  # No scale, no origin to get wrong.
+
+    assert 'transform-origin' in rule, (
+        'the tabs are scaled with no transform-origin, so the scale is about '
+        'the element centre -- hundreds of thousands of pixels below the '
+        'viewport at library scale. The grid drops off the bottom of the screen.'
+    )
+    assert '--tab-origin-y' in rule, (
+        'the transform-origin is a constant; it has to be computed per gesture '
+        'from where the pinned tab actually sits on screen'
+    )
+
+    body = function_body(index, 'pinTab')
+    assert '--tab-origin-y' in body and 'style.top' in body, (
+        'pinTab() does not set both the offset and the origin -- they are one '
+        'decision and a tab pinned without its origin is the shipped bug'
+    )
+
+
+def test_a_pinned_tab_is_offset_by_its_own_position_not_zero(index):
+    """`.content` starts below the header, and the header is not a constant.
+
+    Pinning at `-scrollY` puts the grid that far too high, tucked under the
+    header. The offset has to come from where the tab actually is.
+    """
+    body = function_body(index, 'beginTabTransition')
+    assert 'contentTop' in body, "the freeze does not account for the tab's offset below the header"
+    assert re.search(r'pinTab\(\s*outgoing,\s*contentTop - y', body), (
+        'the outgoing tab is not pinned at its own position minus the scroll'
+    )
+    assert re.search(r'pinTab\(\s*incoming,\s*contentTop', body), (
+        'the incoming tab is not pinned at its own position, so it renders '
+        'under the header instead of below it'
+    )
+
+
+def test_the_first_load_swipe_tip_is_present(index):
+    """It teaches a gesture that has no visible affordance at rest.
+
+    Removed once on the reasoning that a drag demonstrates itself. It only
+    demonstrates itself to someone who already tries it, which is not
+    discoverability. The user asked for it back.
+
+    What stays gone is the post-commit toast naming the tab arrived at -- the
+    motion states that, and states the direction with it.
+    """
+    assert 'swipe-indicator' in index, 'the swipe tip markup is gone'
+    assert 'Swipe left or right' in index, 'the swipe tip has no text'
+    assert 'Switched to' not in index, (
+        'the post-commit toast is back -- the motion already says which tab '
+        'was arrived at, and in which direction'
     )

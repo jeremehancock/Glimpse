@@ -99,12 +99,7 @@ Z_MODAL = 55
 # that happen to have a z-index — a value that only orders siblings inside a
 # positioned ancestor (`.modal-header`, `.trailer-loading`, `.search-clear`)
 # never competes with an overlay and is not this test's business.
-#
-# `.swipe-indicator` was here until the tab drag replaced it. It was a toast
-# announcing which tab a committed swipe had landed on, and a first-load tip
-# teaching the gesture; a drag that follows the thumb and springs back is both
-# of those, delivered by being used.
-CHROME_SELECTORS = ('.header', '.scroll-to-top')
+CHROME_SELECTORS = ('.header', '.scroll-to-top', '.swipe-indicator')
 
 
 def test_layering_tokens_hold_their_order(tokens):

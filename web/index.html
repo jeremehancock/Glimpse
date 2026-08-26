@@ -637,6 +637,12 @@
         .content.tab-entering {
             display: block;
             transform: translateX(var(--tab-shift, 0)) scale(var(--tab-lift, 1));
+            /* The viewport's centre in this element's coordinates, set inline by
+               `pinTab()`. NOT the default 50%: these panels are as tall as the
+               library, so their centre is hundreds of thousands of pixels below
+               the screen, and scaling about it throws the grid downward by
+               `height x 0.03` — measured at +36,791px. See `pinTab()`. */
+            transform-origin: 50% var(--tab-origin-y, 50%);
             will-change: transform;
         }
 
@@ -663,7 +669,10 @@
             position: fixed;
             left: 0;
             right: 0;
-            top: 0;
+            /* `top` is set inline by `pinTab()`, to the tab's own offset below
+               the header rather than to 0. Pinning at 0 tucks the grid under the
+               header, because that is where `.content` starts in the document
+               and a fixed element does not inherit the container's padding. */
         }
 
         /* The lift, at thumb-down.
@@ -1413,14 +1422,39 @@
             }
         }
 
-        /* The `.swipe-indicator` toast is gone, and so is its markup.
+        /* The first-load swipe tip.
 
-           It had two jobs and lost both. It announced "Switched to TV Shows"
-           after a commit, which was a caption for a transition that did not
-           exist — the slide replaced that. And it taught the gesture on first
-           load, which a drag teaches by being dragged: the page moves with the
-           thumb and springs back if you let go, which is the whole lesson,
-           delivered by trying it. */
+           It no longer announces which tab a swipe landed on — the motion says
+           that, and says the direction too. It still TEACHES the gesture on
+           first load, which is the job it was originally added for.
+
+           That half was removed once on the argument that a drag demonstrates
+           itself, and put back: it only demonstrates itself to someone who
+           already tries. Discovering a gesture with no visible affordance is
+           not something to make the viewer guess at. */
+        .swipe-indicator {
+            display: none;
+            position: fixed;
+            bottom: 60px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(0, 0, 0, 0.7);
+            color: #fff;
+            border-radius: 20px;
+            padding: 8px 16px;
+            font-size: 0.9rem;
+            opacity: 0;
+            transition: opacity 0.3s;
+            /* Page chrome. It reports on a swipe over the grid, which is a page
+               interaction — while an overlay is open the page is not what the
+               user is acting on, so this belongs under the overlay tiers. */
+            z-index: var(--z-chrome);
+            pointer-events: none;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+            text-align: center;
+            width: auto;
+            max-width: 80%;
+        }
 
         /* Mobile responsiveness */
 
@@ -1530,6 +1564,11 @@
 
             .search-container {
                 max-width: 100%;
+            }
+
+            /* Show swipe indicator on mobile */
+            .swipe-indicator {
+                display: block;
             }
         }
 
@@ -1946,6 +1985,9 @@
             <div class="media-grid"></div>
         </div>
     </div>
+
+    <!-- Swipe Indicator -->
+    <div class="swipe-indicator"></div>
 
     <!-- ============ Media detail ============
          A tray on a phone, a centred dialog on a pointer device — the
@@ -2560,6 +2602,7 @@
                 );
                 panel.style.removeProperty('--tab-shift');
                 panel.style.removeProperty('--tab-lift');
+                panel.style.removeProperty('--tab-origin-y');
                 panel.style.removeProperty('--dur-tab-settling');
                 panel.style.removeProperty('top');
             }
@@ -2606,11 +2649,58 @@
            itself is free (59.9fps on a 1,228,722px box, zero dropped frames), so
            a hitch here reads as "the slide is janky" and the transform takes the
            blame. Do not add a measurement to this function. */
+        /* Pin a tab at `viewportTop`, and anchor its scale to what is ON SCREEN.
+         *
+         * THE TRANSFORM ORIGIN IS THE WHOLE OF THIS FUNCTION, and getting it
+         * wrong is not subtle. `transform-origin` defaults to an element's own
+         * centre. A tab holding 7,000 items is 1,227,442px tall, so its centre
+         * is some 600,000px below the viewport — and scaling by 0.94 about a
+         * point that far away moves its top edge down by height x 0.03:
+         *
+         *     measured, 7,000 movies:  the first card jumped +36,791px
+         *
+         * The grid simply left the screen downward the instant a thumb touched
+         * it. Worse, the displacement is proportional to LIBRARY SIZE, so the
+         * 7,000-item tab vanished while the 1,200-item one barely moved — which
+         * presents as "it always shows the TV Shows grid whichever way I swipe",
+         * a routing bug that does not exist.
+         *
+         * So the origin is the centre of the VIEWPORT, expressed in the
+         * element's own coordinates: the element's top edge sits at `viewportTop`
+         * on screen, so the viewport's middle is `middle - viewportTop` down from
+         * that edge. The tab then shrinks around what the viewer is looking at,
+         * which is also the only part of it they can see.
+         *
+         * `CLAUDE.md` warned that a scale moves `getBoundingClientRect().top`.
+         * That was read here as an arithmetic hazard for the grid's windowing —
+         * it is also, and much more urgently, a VISIBLE one. The windowing guard
+         * was necessary and it was not sufficient.
+         */
+        function pinTab(panel, viewportTop, middle) {
+            panel.style.top = `${viewportTop}px`;
+            panel.style.setProperty('--tab-origin-y', `${middle - viewportTop}px`);
+        }
+
         function beginTabTransition(contentName, outgoing, incoming, lifted) {
             // Anything still in flight is resolved before a new one starts.
             endTabTransition();
 
             const y = window.scrollY;
+
+            /* The tab's offset down the DOCUMENT, read here and nowhere later.
+               `.content` starts below the header, so a tab pinned at `-y` sits
+               that far too high — and the header's height is not a constant to
+               hardcode, it shrinks on scroll.
+
+               THIS READ IS SAFE AND THE ONE BELOW IT WOULD NOT BE. Layout is
+               clean at this instant: the browser laid the page out for the last
+               frame and nothing here has written a style yet, so this costs
+               nothing. The 77.7ms figure is for a read AFTER a write, which
+               forces a synchronous re-layout. The rule is not "never measure",
+               it is "never measure something you just invalidated" — so this
+               must stay above every write in this function. */
+            const contentTop = outgoing.getBoundingClientRect().top + y;
+            const viewportMiddle = window.innerHeight / 2;
 
             const record = {
                 outgoing,
@@ -2660,9 +2750,14 @@
                A fixed element contributes no scrollable overflow, so pinning
                both collapses the document to viewport height and the browser
                clamps scrollY to 0 by itself. The explicit scroll below is kept
-               anyway — see there. */
-            outgoing.style.top = `${-y}px`;
+               anyway — see there.
+
+               Both offsets are measured from `contentTop`, not from zero. The
+               outgoing tab renders exactly where it already was; the incoming
+               one shows its own top, which is `contentTop` with the page at 0. */
+            pinTab(outgoing, contentTop - y, viewportMiddle);
             outgoing.classList.add('tab-leaving');
+            pinTab(incoming, contentTop, viewportMiddle);
             incoming.classList.add('tab-entering', 'tab-pinned');
 
             /* Both tabs are out of the scroller and the incoming one is off
@@ -2829,6 +2924,9 @@
         function beginResistedDrag(outgoing) {
             endTabTransition();
             const y = window.scrollY;
+            // Read before any write, exactly as in beginTabTransition().
+            const contentTop = outgoing.getBoundingClientRect().top + y;
+            const viewportMiddle = window.innerHeight / 2;
             const record = {
                 outgoing,
                 incoming: null,
@@ -2842,7 +2940,7 @@
             tabTransition = record;
 
             document.documentElement.classList.add('tab-transitioning', 'tab-dragging');
-            outgoing.style.top = `${-y}px`;
+            pinTab(outgoing, contentTop - y, viewportMiddle);
             outgoing.classList.add('tab-leaving', 'tab-lifted');
             outgoing.style.setProperty('--tab-lift', TAB_LIFT);
             return record;
@@ -4281,6 +4379,24 @@
                and it moves back if you let go — which is both halves of the
                lesson, delivered by trying it rather than by being told. A toast
                explaining a gesture that demonstrates itself is noise. */
+            /* ^ That reasoning was wrong and the tip is back.
+
+               A drag only demonstrates itself to a viewer who already tries it.
+               The gesture still has no visible affordance at rest, so removing
+               the one thing that says it exists left it discoverable by accident
+               only. What IS gone is the other toast — "Switched to TV Shows",
+               after a commit — which was a caption for a transition that did not
+               exist when it was written. The motion states that now, and states
+               the direction with it. */
+            const swipeIndicator = document.querySelector('.swipe-indicator');
+            setTimeout(() => {
+                swipeIndicator.textContent =
+                    'Swipe left or right to switch between Movies and TV Shows';
+                swipeIndicator.style.opacity = '1';
+                setTimeout(() => {
+                    swipeIndicator.style.opacity = '0';
+                }, 3000);
+            }, 2000);
 
             function touchInsideOverlay(target) {
                 return !!(target && target.closest &&

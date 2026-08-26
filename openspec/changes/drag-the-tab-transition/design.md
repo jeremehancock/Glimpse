@@ -396,6 +396,46 @@ container, including ones this gesture never claims.
 guard, not the incidental fact that fixed tabs cannot scroll. Stated above at
 length because the incidental fact is the tempting answer.
 
+**[A scale about the default origin throws the grid off the screen]** →
+**NOT PREDICTED. Shipped to `:dev` and found by the user.** The entry above
+treats a moved `getBoundingClientRect().top` purely as an arithmetic hazard for
+the windowing, and guards it correctly. It is also a *visible* hazard, and that
+half was never considered.
+
+`transform-origin` defaults to the element's own centre. A tab holding 7,000
+items is 1,227,442px tall, so its centre is ~600,000px below the viewport, and
+scaling by 0.94 about a point that far away moves the top edge down by
+`height × 0.03`. **Measured: the first card jumped +36,791px.** The grid left
+the screen downward the instant a thumb touched it.
+
+The second symptom is the more instructive one. The displacement is proportional
+to library size, so the 7,000-item tab vanished while the 1,200-item tab barely
+moved — and it presented as *"it always shows the TV Shows grid whichever way I
+swipe."* That is a routing bug, it does not exist, and it is where anyone would
+look first. Two reports, one cause, and the plausible cause was the wrong one.
+
+Fixed by `pinTab()`, which sets `transform-origin` to the viewport's centre in
+the element's own coordinates, so the tab shrinks around the part of it the
+viewer can actually see. The residual shift of the top row is 20px at a 0.94
+scale — that is the lift, symmetric about the viewport centre, and it resolves
+to zero on settle.
+
+**The general lesson, which is why this is written up rather than just fixed:**
+these panels are *enormous*, and that fact has to be the first thing in mind
+when reasoning about them, not a footnote. The archived design already knew it
+(*"a `translateX` on a box 1,228,722px tall"*) and drew the correct conclusion
+for translation, where size genuinely does not matter. For a scale it decides
+everything.
+
+**[The frozen tabs sit under the header]** → Also missed initially and fixed in
+the same pass. `.content` begins below the header, so pinning at `-scrollY`
+puts the grid that far too high. The offset must come from the tab's own
+position, which is not a constant — the header shrinks on scroll. That needs one
+`getBoundingClientRect()`, taken **before any write** in the setup, against
+layout the browser has already computed. The ~78ms rule is *never measure what
+you just invalidated*, not *never measure*, and the test now enforces the
+ordering rather than banning the call.
+
 **[The abandon path forces a layout]** → Confirmed hazard, ~78ms, placed
 deliberately after the settle rather than avoided. If it proves visible, the
 lever is restoring the scroll before removing `position: fixed` and accepting
@@ -458,10 +498,13 @@ never claimed drops **53–67 frames per run on its own** — against the drag's
 environment.* The tail is a question for a real phone, which is where it was
 always going to be answered.
 
-**[Removing the first-load tip removes discoverability]** → The tip taught a
+**[Removing the first-load tip removes discoverability]** → ~~The tip taught a
 gesture with no visible affordance. A drag has one: the page moves the moment
-the thumb does. If the tip is missed it comes back, but it is noise beside a
-gesture that demonstrates itself.
+the thumb does.~~ **It was missed, and it is back.** A drag demonstrates itself
+only to someone who already tries it; at rest the gesture still has no visible
+affordance, so removing the one thing that announced it left it discoverable by
+accident. The *post-commit* toast naming the arrived-at tab stays gone — the
+motion states that, and the direction with it.
 
 ## Migration Plan
 
