@@ -123,13 +123,18 @@
        that barely moved takes exactly as long as the transition did before this
        gesture existed.
 
-       There is no radius token here on purpose. A rounded corner is the obvious
-       third ingredient of a lift and it would draw nothing — the frozen tab is
-       as tall as the library, so its corners are not on screen. index.html says
-       so at the rule; this is the other half of that note, for anyone adding
-       one here. */
+       THE LIFT IS A SCALE AND A SCRIM, and there is deliberately no elevation
+       token and no radius token. Both were tried and both were removed for the
+       same reason: these panels are as tall as the whole library, so only one
+       viewport of each is ever on screen and neither end of them is.
+
+       A shadow on a panel that tall renders only as a blurred band down each
+       vertical edge — its top and bottom are far off screen — and with the tabs
+       24px apart two of those bands land in that gap together. It read as noise
+       following the thumb. A radius renders nothing whatsoever, for the same
+       geometry. index.html says so at the rule; this is the other half of that
+       note, for whoever comes here to add one. */
     --tab-drag-lift: 0.94;
-    --tab-drag-elevation: var(--elev-4);
     --tab-drag-scrim: rgba(0, 0, 0, 0.28);
     --dur-tab-settle-min: 120ms;
 

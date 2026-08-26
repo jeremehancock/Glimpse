@@ -639,19 +639,34 @@ def test_the_tabs_move_edge_to_edge_and_never_overlap(index, tokens):
     )
 
 
-def test_the_lift_declares_no_radius_it_cannot_draw(index):
-    """The frozen tab is as tall as the library; its corners are not on screen.
+def test_the_lift_is_a_scale_and_a_scrim_only(index, tokens):
+    """Both other ingredients of a "raised card" were tried here and removed.
 
-    A rounded corner is the obvious third ingredient of a lift and it would draw
-    nothing. A declaration that appears to shape the panel and does not is where
-    the next live one hides.
+    One reason covers both, and it is the first fact about these panels: they are
+    as tall as the whole library, so only one viewport of each is ever on screen
+    and neither end of them is.
+
+    A box-shadow therefore renders only as a blurred band down each vertical
+    edge -- top and bottom are far off screen -- and with the tabs 24px apart,
+    two of those bands sit in the gap at once. Reported as distracting, which is
+    what it was: noise tracking the thumb. A border-radius renders nothing at
+    all, and would additionally need `overflow: hidden` to clip cards to it.
+
+    The scale does the visible work: it makes each tab narrower than the
+    viewport, which is what opens the gap between them.
     """
-    rule = css_rule(index, '.content.tab-lifted')
-    assert 'box-shadow' in rule, 'the lift has no elevation'
-    assert 'border-radius' not in rule, (
-        'the lifted tab declares a radius it cannot draw -- it is pinned at the '
-        'captured scroll offset and is as tall as the whole library'
+    for gone in ('--tab-drag-elevation', 'box-shadow: var(--tab-drag'):
+        assert gone not in index and gone not in tokens, (
+            f'{gone} is back -- on a panel 1,227,442px tall a shadow is a band '
+            f'down each edge following the thumb, and two of them land in the '
+            f'gap between the tabs'
+        )
+    assert 'tab-lifted' not in index, (
+        'the .tab-lifted class is back but the lift is a scale and a scrim; an '
+        'empty class is a hook for exactly the declarations that were removed'
     )
+    assert '--tab-drag-lift:' in tokens, 'the lift scale token is gone'
+    assert '--tab-drag-scrim:' in tokens, 'the scrim token is gone'
 
 
 def test_the_drag_is_gated_with_the_gesture_not_a_breakpoint(index):
@@ -683,7 +698,7 @@ def test_teardown_clears_everything_the_drag_sets(index):
     screen to explain it.
     """
     body = function_body(index, 'endTabTransition')
-    for cls in ('tab-leaving', 'tab-entering', 'tab-pinned', 'tab-sliding', 'tab-lifted'):
+    for cls in ('tab-leaving', 'tab-entering', 'tab-pinned', 'tab-sliding'):
         assert cls in body, f'the teardown does not clear {cls}'
     for prop in ('--tab-shift', '--tab-lift', '--dur-tab-settling', 'top'):
         assert prop in body, f'the teardown does not clear {prop}'
@@ -788,4 +803,40 @@ def test_the_first_load_swipe_tip_is_present(index):
     assert 'Switched to' not in index, (
         'the post-commit toast is back -- the motion already says which tab '
         'was arrived at, and in which direction'
+    )
+
+
+def test_a_skipped_render_still_puts_the_window_at_the_top(index):
+    """THIS ONE SHIPPED, and the render signature caused it.
+
+    The signature answers "is the selection unchanged". It says nothing about
+    WHERE the rendered window sits, and the window position is part of what is
+    rendered. Scrolling a tab moves it: at 6,000px the grid was rendering from
+    item 24, standing on a ~4,000px spacer. Swiping back pins that tab at its
+    TOP -- which is where the spacer is.
+
+    Measured on the build that shipped: 0 of 120 rendered cards on screen, and
+    the viewer had to scroll four thousand pixels down to find their library.
+    Reported as "when you swipe back to the previous grid it shows blank until
+    you scroll", which is exactly what it did.
+
+    Every caller that can skip is about to show the tab from its first item, so
+    the window has to be there. Re-windowing is not re-rendering -- ~45ms
+    against ~175ms -- so the skip keeps its value.
+    """
+    body = function_body(index, 'filterAndSortMedia')
+    skip = re.search(
+        r'if \(!animateCards && view\.signature === signature && view\.rendered > 0\) \{(.*?)\}',
+        body,
+        flags=re.S,
+    )
+    assert skip, 'the render skip is gone or has changed shape'
+    assert 'renderWindow' in skip.group(1), (
+        'the skip returns without checking where the rendered window sits, so a '
+        'tab scrolled away from and returned to shows its spacer instead of its '
+        'items -- a blank grid'
+    )
+    assert 'view.first !== 0' in skip.group(1), (
+        'the skip re-windows unconditionally; it should only pay that cost when '
+        'the window is not already at the top'
     )

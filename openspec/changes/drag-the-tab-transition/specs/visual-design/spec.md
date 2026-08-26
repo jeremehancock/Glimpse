@@ -3,8 +3,14 @@
 ### Requirement: A tab being dragged is lifted off the page
 
 When a tab drag is claimed, the moving tab SHALL take on a raised presentation
-for the duration of the gesture: reduced in size, given elevation and a corner
-radius, with the surface behind it dimmed.
+for the duration of the gesture: reduced in size, with the surface behind it
+dimmed.
+
+The raise SHALL NOT be expressed as a drop shadow or a corner radius. These
+panels are as tall as the entire library and pinned at the viewer's scroll
+offset, so only one viewport of each is ever on screen and neither end of them
+is: a shadow renders solely as a band down each vertical edge that tracks the
+thumb, and a radius renders nothing at all.
 
 The lift arrives as the gesture is claimed rather than easing in over the drag,
 so that the viewer's first frame of feedback is the confirmation that their
@@ -15,14 +21,14 @@ Without it a tab sliding sideways reads as a page repainting. With it the tab
 reads as a card the viewer is pushing aside — which is what the gesture is, and
 what makes it feel like an application rather than a document.
 
-The lift's scale, its elevation, its radius and the scrim SHALL be drawn from
-the shared token set, not restated at the point of use.
+The lift's scale and the scrim SHALL be drawn from the shared token set, not
+restated at the point of use.
 
 #### Scenario: The lift appears when the gesture is claimed
 
 - **WHEN** a horizontal tab drag is claimed
-- **THEN** the moving tab SHALL be visibly raised — smaller, elevated, with
-  rounded corners — and the surface behind it SHALL be dimmed
+- **THEN** the moving tab SHALL be visibly raised — reduced in size — and the
+  surface behind it SHALL be dimmed
 
 #### Scenario: The lift does not appear for a scroll or a tap
 
@@ -32,8 +38,7 @@ the shared token set, not restated at the point of use.
 #### Scenario: The lift is removed when the gesture resolves
 
 - **WHEN** a tab drag commits, is abandoned, or is cancelled
-- **THEN** the lift, its elevation, its radius and the scrim SHALL all be
-  removed
+- **THEN** the lift and the scrim SHALL both be removed
 
 #### Scenario: The lift lands instantly under reduced motion
 

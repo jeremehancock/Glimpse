@@ -518,12 +518,16 @@ those tags.
     query.** Same pairing rule as the affordances: two conditions describing one
     capability drift, and this repo has already shipped a pair that reached 992px
     and 768px independently.
-  - **The lift declares no border-radius.** It is the obvious third ingredient
-    after the scale and the shadow, and it would draw nothing: the frozen tab is
-    pinned at the captured offset and is as tall as the whole library, so its
-    corners are never on screen. That the panel is *enormous* is the same fact
-    behind the transform-origin bug above — when reasoning about the frozen
-    tabs, its height is the first thing to hold in mind, not the last.
+  - **The lift is a SCALE AND A SCRIM.** A drop shadow and a corner radius were
+    both built and both removed, for one reason that is the first fact to hold
+    about these panels: they are as tall as the whole library and pinned at the
+    captured offset, so only one viewport of each is ever on screen and neither
+    end of them is. A `box-shadow` therefore renders only as a blurred band down
+    each vertical edge, tracking the thumb — and with the tabs 24px apart, two
+    of those bands land in the gap together. It shipped, and read as noise. A
+    radius renders nothing whatsoever. That the panel is *enormous* is the same
+    fact behind the transform-origin bug above: with these tabs, their height is
+    the first thing to reason from, not the last.
   - **The first-load swipe tip stays.** It was removed on the argument that a
     drag demonstrates itself; it only demonstrates itself to someone who already
     tries it, and the gesture has no visible affordance at rest. What is gone is

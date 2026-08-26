@@ -18,8 +18,10 @@ with their thumb. The grid should too.
   neither ever drawn over the other. (A parallax lag was built first and
   reverted: overlapping tabs made document order decide which was visible.)
 - **The thumb-down lift.** As the gesture is claimed, the moving tab drops back
-  — a small scale, elevation and corner radius, with the page beneath dimming —
-  so it reads as a card being pushed aside rather than a page repainting.
+  — a small scale, with the page beneath dimming — so it reads as a card being
+  pushed aside rather than a page repainting. A shadow and a corner radius were
+  both built and both removed: on a panel as tall as the library neither renders
+  as anything but noise down the edges.
 - **The gesture commits on intent, not on a fixed distance.** A lift past a
   third of the viewport commits; so does a fast flick that has travelled much
   less. Anything else settles back with the tab returning to where it was and

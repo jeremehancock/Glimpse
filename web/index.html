@@ -675,26 +675,30 @@
                and a fixed element does not inherit the container's padding. */
         }
 
-        /* The lift, at thumb-down.
+        /* The lift is a SCALE AND A SCRIM. It has no rule of its own, and both
+           of the properties a "raised card" normally also carries were tried
+           here and removed. The reason is the same one in both cases, and it is
+           the first thing to hold in mind about these panels: they are as tall
+           as the whole library — 1,227,442px at 7,000 items — and pinned at the
+           captured scroll offset, so only one viewport of each is ever on
+           screen and neither end is.
 
-           The scale is not here — it is `--tab-lift` above, composed into the
-           same `transform` so one declaration does not fight the other. This is
-           the rest of what a raised card is: it throws a shadow, and the surface
-           it was flush with a moment ago is now visible behind it.
+           NO ELEVATION. A `box-shadow` on a panel that tall puts its top and
+           bottom shadows far off screen; all that renders is a blurred band down
+           each vertical edge, tracking the tab as it moves. With the tabs 24px
+           apart, two of those bands sit in that gap at once. It read as visual
+           noise following the thumb, which is what it was.
 
-           NO BORDER RADIUS, deliberately. A rounded corner is the obvious third
-           ingredient and it would render nothing: the frozen tab is as tall as
-           the whole library — 1,227,442px at 7,000 items — pinned at the
-           captured scroll offset, so its top corners are off screen except at
-           the very top of the list and its bottom corners are a million pixels
-           below the viewport. Adding the radius would also mean `overflow:
-           hidden` to clip the cards to it, which is a real containing-block
-           change bought for something almost never on screen. A declaration
-           that appears to shape the panel and does not is where the next live
-           one hides. */
-        .content.tab-lifted {
-            box-shadow: var(--tab-drag-elevation);
-        }
+           NO BORDER RADIUS. Same geometry, and it renders nothing at all: the
+           top corners are off screen except at the very top of the list, the
+           bottom corners are a million pixels below the viewport. It would also
+           require `overflow: hidden` to clip the cards to it — a real
+           containing-block change bought for something almost never visible.
+
+           What remains does the work: the scale (`--tab-lift`, composed into the
+           same `transform` as the offset so the two cannot fight) makes each tab
+           narrower than the viewport, which opens the gap between them, and the
+           scrim below shows the page they have been lifted off. */
 
         /* The surface behind the lifted tab: what it is lifted OFF.
 
@@ -2604,7 +2608,7 @@
                    that removes from both cannot fall out of step with either. */
                 if (onEnd) panel.removeEventListener('transitionend', onEnd);
                 panel.classList.remove(
-                    'tab-leaving', 'tab-entering', 'tab-pinned', 'tab-sliding', 'tab-lifted'
+                    'tab-leaving', 'tab-entering', 'tab-pinned', 'tab-sliding'
                 );
                 panel.style.removeProperty('--tab-shift');
                 panel.style.removeProperty('--tab-lift');
@@ -2791,8 +2795,6 @@
 
             if (lifted) {
                 document.documentElement.classList.add('tab-dragging');
-                outgoing.classList.add('tab-lifted');
-                incoming.classList.add('tab-lifted');
                 outgoing.style.setProperty('--tab-lift', TAB_LIFT);
                 incoming.style.setProperty('--tab-lift', TAB_LIFT);
             }
@@ -2954,7 +2956,7 @@
 
             document.documentElement.classList.add('tab-transitioning', 'tab-dragging');
             pinTab(outgoing, contentTop - y, viewportMiddle);
-            outgoing.classList.add('tab-leaving', 'tab-lifted');
+            outgoing.classList.add('tab-leaving');
             outgoing.style.setProperty('--tab-lift', TAB_LIFT);
             return record;
         }
@@ -3611,10 +3613,26 @@
                server switch, or by a render that threw — must rebuild.
 
                An entrance animation is a reason to render anyway: the caller is
-               asking for the cards to arrive, not merely to be present. */
+               asking for the cards to arrive, not merely to be present.
+
+               THE WINDOW POSITION IS PART OF WHAT IS RENDERED, and leaving it
+               out of this shipped a blank grid. The signature answers "is the
+               selection unchanged" and says nothing about WHERE the rendered
+               window sits. Scrolling a tab moves that window — at 6,000px the
+               grid was rendering from item 24, standing on a ~4,000px spacer —
+               and the tab is then shown again at its TOP, where the spacer is.
+               Every caller that skips is about to show the tab from its first
+               item, so the window has to be there. Measured before this branch
+               existed: 0 of 120 rendered cards on screen, and the viewer had to
+               scroll down four thousand pixels to find their own library.
+
+               Re-windowing is not re-rendering: ~45ms to rebuild the window
+               against data already filtered and sorted, against ~175ms to do
+               the whole thing again. The skip keeps its value. */
             const signature = renderSignature(target, searchTerm, data);
             const view = gridView(target);
             if (!animateCards && view.signature === signature && view.rendered > 0) {
+                if (view.first !== 0) renderWindow(view, 0, false);
                 return;
             }
 
