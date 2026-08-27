@@ -95,6 +95,22 @@ never introduce a step that compiles, minifies, or transpiles them.
 `Dockerfile`, `config/` or entrypoint change needs `make docker-smoke` locally
 first. See [docs/docker.md](docs/docker.md).
 
+**Nor does it cover the workflows themselves.** They only ever run on GitHub, so
+a mistake in `.github/workflows/` surfaces after a push and — for the publish
+workflow — sometimes not even then. `tests/test_workflow_actions.py` pins every
+action's version exactly, in both directions, the same way
+`test_compose_surface.py` pins the compose surface, and for the same reason: a
+workflow file is edited rarely and read less often, so a version drifts by
+*nothing happening to it*. **An intentional bump is supposed to fail that test.**
+Move the table in the same commit; never relax the assertion to get past it.
+
+What it cannot do is tell you a pinned version has gone stale — that needs the
+network, and a gate that needs the network fails on GitHub's bad days rather than
+on this repo's. Runtime deprecations arrive in a build log, and they undercount:
+the warning enumerates the actions that *ran*, so one behind an `if:` is silently
+omitted. `softprops/action-gh-release` was missed exactly that way. When a
+deprecation is reported, check every action's `action.yml`, not the warning text.
+
 **Docs.** Check whether the change makes `README.md`, `docs/`, or this file
 stale, and fix it in the **same** commit. Docs drift silently — nothing fails
 when they fall out of sync, so checking every time is the only defense. If
