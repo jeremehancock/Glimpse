@@ -315,8 +315,49 @@ those tags.
     panel carrying only a grip has nothing at pointer widths. The Actions tray
     did exactly that, and between 769px and 992px — where the hamburger still
     opens it — it appeared as a dialog with neither. Backdrop and Escape worked;
-    nothing on screen said so. A plain `.modal` is the exception: centred at
-    every width, never shows a grip, so its × is the whole affordance.
+    nothing on screen said so. **There is no longer a plain `.modal`** — every
+    overlay wears both shapes, so every one needs both. A plain `.modal` used to
+    be the exception (centred at every width, never shows a grip, so its × was
+    the whole affordance), and the trailer was the last one.
+  - **The trailer's exception is worth keeping, because the reasoning was sound
+    and applied at the wrong width.** It stayed centred on the argument that it
+    is sized to its video's aspect ratio while a tray's job is to fill a screen's
+    width — true of a desktop. At touch widths a tray *is* the width of the
+    screen, so a full-width 16:9 video fills it exactly and there is nothing to
+    letterbox against. What a phone actually had was the app's only centred
+    overlay, dismissible only by a × in the corner furthest from a thumb.
+  - **An overlay's panel never declares its own background, border or radius.**
+    The panel is the app's surface wherever it appears. `.modal__panel--video`
+    set `background: #000`, which gave the trailer a pure black head beside every
+    other overlay's `#2a2a2a` and a per-server accent that stopped at its own
+    border. An overlay holding media may paint the **well** the media sits in
+    black — a video letterboxes against its container, and letterboxing against
+    `--surface` reads as a rendering fault, so that black is a property of the
+    medium — but it stops at the well.
+    - **A placeholder in that well is opaque and the SAME value as the well.**
+      The loading state was `rgba(26, 26, 26, 0.7)`, which composites over black
+      to `#121212`. So the two were different blacks with a seam between them,
+      and the region changed colour at the instant the video arrived — the
+      instant a viewer is looking hardest at it, and the one moment no
+      screenshot of a resting overlay can show.
+  - **A fixed-ratio box is capped by its WIDTH, never by `max-height`.**
+    `max-height` on an `aspect-ratio` box clamps the height while the width goes
+    on filling its container, so the ratio breaks and the content letterboxes
+    inside its own well. Derive the width from the height budget instead —
+    `width: min(100%, calc((88vh - 120px) * 16 / 9))`. It only ever binds on a
+    short viewport (a landscape phone, a 700px desktop window), which is exactly
+    where nobody looks.
+  - **A head title is bounded to one line at the shared rule, by a line clamp
+    and not by `white-space: nowrap`.** The trailer is the first head whose title
+    is data rather than a constant, and it must be bounded because on touch the
+    head is part of the drag region. Nowrap sets a property that
+    `.modal__fixed .modal-title` — the detail overlay's deliberate three-line
+    title — does not, so it wins everywhere and silently flattens that title to
+    one line. A clamp composes: the shared rule states the default, an overlay
+    with the room states its own. `min-width: 0` is load-bearing and reads like
+    boilerplate: a flex item's default `min-width: auto` refuses to shrink below
+    its content, so without it a long title pushes the × out through the side of
+    the panel instead of truncating.
   - **A closing overlay is not an open one.** Both the scroll lock and the focus
     manager skip anything carrying `.overlay-closing`. Waiting for `display:none`
     instead pins the page for a beat after every dismissal, so the first flick is

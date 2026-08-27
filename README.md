@@ -4,12 +4,12 @@ A sleek, responsive web application for browsing and viewing your Plex, Jellyfin
 
 ## ✨ Features
 
-- **Modern Interface**: Clean, responsive design that works on mobile and desktop — menus and details open as app-style trays on phones, swipe down to dismiss
+- **Modern Interface**: Clean, responsive design that works on mobile and desktop — every overlay opens as an app-style tray on phones, swipe down to dismiss
 - **Multi-Server Support**: Connect to Plex, Jellyfin, Emby, or multiple servers simultaneously
 - **Media Browsing**: View your Movies and TV Shows with poster art — on a phone, drag sideways and the two slide with your thumb, springing back if you change your mind
 - **Search Capability**: Quickly find content across your libraries
 - **Detailed View**: See cast information, genres, and descriptions
-- **Watch Movie Trailers**: Preview content directly from the interface
+- **Watch Movie Trailers**: Preview content directly from the interface, in an overlay titled with the film you picked
 - **Random Content Selection**: "Roll the Dice" feature for discovering random Movies or TV Shows
 - **Genre Filters**: Easily filter media by genre
 - **Sort A–Z / Z–A**: Alphabetical sorting

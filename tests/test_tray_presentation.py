@@ -336,6 +336,134 @@ def test_roulette_announces_its_status_not_its_dialog(markup):
 
 
 # ---------------------------------------------------------------------------
+# The trailer
+# ---------------------------------------------------------------------------
+
+
+def test_trailer_is_a_tray_on_touch(markup):
+    assert 'modal modal--tray-on-touch" x-show="trailerOpen"' in markup
+
+
+def test_trailer_panel_declares_no_background(overlays):
+    """The regression that started this: `.modal__panel--video` set `#000`.
+
+    That made the trailer the one panel in the app not drawn from --surface — a
+    pure black head beside every other overlay's #2a2a2a, and a per-server accent
+    that stopped at this overlay's border. The modifier sizes the panel and does
+    nothing else; black belongs to the well the video sits in.
+    """
+    body = css_block(overlays, '.modal__panel--video')
+    assert 'background' not in body, (
+        '.modal__panel--video paints its own panel. An overlay that does not use '
+        'the shared surface stops matching the app the first time a token moves, '
+        'and nothing fails when it does.'
+    )
+
+
+def _declared_background(body: str) -> str:
+    match = re.search(r'background(?:-color)?:\s*([^;]+);', body)
+    assert match, f'no background declared in {body!r}'
+    return match.group(1).strip()
+
+
+def test_the_well_and_its_loading_state_are_the_same_colour(index):
+    """A PAIR, and the defect is only visible on the frames between two states.
+
+    `.trailer-loading` was `rgba(26, 26, 26, 0.7)`, which composites over the
+    well's black to #121212 — so the two were different blacks with a seam
+    between them, and the region changed colour at the instant the iframe faded
+    in. That instant is when a viewer is looking hardest at it, and it is also
+    the one moment no screenshot of a resting overlay can show.
+
+    Compared as declared values rather than as "both are black": a translucent
+    colour is the exact way this broke, and `rgba(0, 0, 0, 0.3)` would read as
+    black to any test asking for the word.
+    """
+    well = _declared_background(block_after(index, '.trailer-container {'))
+    loading = _declared_background(block_after(index, '.trailer-loading {'))
+    assert well == loading, (
+        f'the video well is {well} and its loading state is {loading}. They must '
+        f'be the same opaque value or the overlay changes colour as the video '
+        f'arrives.'
+    )
+    assert 'rgba' not in well, (
+        f'{well} is translucent, so it composites against whatever is behind it '
+        f'rather than stating a colour'
+    )
+
+
+def test_trailer_spinner_takes_its_colours_from_tokens(index):
+    """Its track was `rgba(229, 160, 13, 0.2)` — Plex yellow at 20%.
+
+    On Jellyfin and Emby the ring was therefore drawn in another server's theme,
+    with nothing on screen or in the source to say so. A hardcoded colour on a
+    themed component is invisible on the theme it was picked from, which is the
+    only one anyone tests in.
+    """
+    body = block_after(index, '.trailer-spinner {')
+    assert 'rgba(' not in body and '#' not in body, f'.trailer-spinner hardcodes a colour: {body!r}'
+    assert 'var(--primary-color)' in body, 'the leading edge should follow the server accent'
+
+
+def test_trailer_spinner_does_not_duplicate_the_apps_keyframe(index):
+    """`@keyframes trailer-spin` was byte-identical to `spinner-rotate`."""
+    assert '@keyframes trailer-spin' not in index
+    assert 'spinner-rotate' in block_after(index, '.trailer-spinner {')
+
+
+def test_the_video_well_is_capped_by_width_not_height(index):
+    """`max-height` on an aspect-ratio box is the trap this avoids.
+
+    It clamps the height while the width goes on filling its container, so the
+    ratio breaks and the video letterboxes inside its own well — silently, and
+    only on the short viewports (a landscape phone) nobody checks. Deriving the
+    width from the height budget keeps the box 16:9 at every size.
+    """
+    body = block_after(index, '.trailer-container {')
+    assert 'aspect-ratio: 16 / 9' in body
+    assert 'max-height' not in body, (
+        'a max-height here clamps the height and leaves the width filling its '
+        'container, which breaks the ratio instead of bounding the box'
+    )
+    assert re.search(r'width:\s*min\(100%,\s*calc\(', body), (
+        'the well is not capped by the height available, so a landscape phone '
+        'pushes the video out of the panel'
+    )
+
+
+# ---------------------------------------------------------------------------
+# Region order
+# ---------------------------------------------------------------------------
+
+
+def test_a_panel_with_a_grip_orders_its_three_regions(markup):
+    """Grip, then head, then body — and the body last is the load-bearing part.
+
+    A head that follows its body is a head the drag gesture still matches and the
+    viewer still sees, so nothing looks wrong; but `touch-action: none` is
+    honoured only while the head is not inside the scroller, and the ordering is
+    what keeps them siblings in practice. Asserted for every panel that has a
+    grip rather than for the overlay that needed it first — the trailer's regions
+    arrived with `modal--tray-on-touch`, and the next one's must too.
+    """
+    seen = 0
+    for name, (_, chunk) in overlay_panels(markup).items():
+        if 'sheet__grip' not in chunk:
+            continue
+        seen += 1
+        grip = chunk.index('sheet__grip')
+        head = re.search(r'(?:sheet|modal)__head', chunk)
+        body = re.search(r'(?:sheet|modal)__body', chunk)
+        assert head, f'overlay {name!r} has a grip and no head'
+        assert body, f'overlay {name!r} has a grip and no body'
+        assert grip < head.start() < body.start(), (
+            f'overlay {name!r} orders its regions grip@{grip}, '
+            f'head@{head.start()}, body@{body.start()}'
+        )
+    assert seen >= 5, f'expected every gripped panel, found {seen}'
+
+
+# ---------------------------------------------------------------------------
 # The head divider
 # ---------------------------------------------------------------------------
 
