@@ -3,7 +3,15 @@
 # Container entrypoint.
 #
 # This script does four things: migrate an old data layout, generate the two
-# files the frontend reads, run an initial fetch, and start supervisord.
+# files the frontend reads, run an initial fetch for each server that needs one,
+# and start supervisord.
+#
+# "that needs one" is the whole of the boot-time logic. Each server records a
+# fingerprint of the settings that produced its last SUCCESSFUL import; if the
+# current settings still hash to that, its fetch is skipped and the site comes
+# up in seconds on the snapshot already on the volume. A restart used to re-import
+# every library unconditionally, and because supervisord starts last, the
+# container refused connections for the whole of it.
 #
 # What it deliberately does NOT do is edit any file under /app/web. The previous
 # version of this script was 1,915 lines, most of it `sed` rewriting index.html
@@ -25,6 +33,10 @@ set -euo pipefail
 WEB_DIR=/app/web
 DATA_DIR=/app/data
 CRON_FILE=/etc/cron.d/media-cron
+# The fingerprints of the CURRENT environment, one file per configured server.
+# Under /run on purpose: these are derived fresh on every boot and must not
+# survive one. Only the recorded fingerprints, under $DATA_DIR, persist.
+FINGERPRINT_DIR=/run/glimpse/fingerprints
 
 # ---------------------------------------------------------------------------
 # Migrate the pre-multi-server data layout
@@ -77,7 +89,9 @@ mkdir -p "$DATA_DIR/plex" "$DATA_DIR/jellyfin" "$DATA_DIR/emby"
 # configured with, and a container that serves a misconfigured library looks
 # exactly like one that is working.
 echo "Resolving configuration..."
-if ! python3 /app/scripts/glimpse_config.py --output "$WEB_DIR" --crontab "$CRON_FILE"; then
+mkdir -p "$FINGERPRINT_DIR"
+if ! python3 /app/scripts/glimpse_config.py \
+    --output "$WEB_DIR" --crontab "$CRON_FILE" --fingerprint-dir "$FINGERPRINT_DIR"; then
     echo "Error: could not resolve configuration. Refusing to start." >&2
     exit 1
 fi
@@ -95,23 +109,66 @@ ln -sfn "$DATA_DIR" "$WEB_DIR/data"
 # Initial fetch
 # ---------------------------------------------------------------------------
 #
-# Runs before supervisord, so the first page load has data rather than an empty
-# library. This is existing behavior and is preserved deliberately: it means a
-# slow or unreachable server delays startup, which is the trade that was already
-# being made. The fetchers are individually non-fatal — one unreachable server
-# must not stop the others, or a single bad token takes down a working install.
+# Runs before supervisord, so a first install's first page load has data rather
+# than an empty library. That ordering is unchanged and does not need to change:
+# a server whose settings are unchanged is skipped outright, so a restart has
+# nothing slow left ahead of supervisord.
+#
+# The fetchers are individually non-fatal — one unreachable server must not stop
+# the others, or a single bad token takes down a working install.
+
+# Whether $1's boot fetch is needed. True when its recorded fingerprint is
+# missing or differs from the current one.
+#
+# `cmp` treats a missing file as a difference, so "never imported" and "settings
+# changed" arrive at the same answer through the same call. There is deliberately
+# no separate existence test: a second condition is a second thing to get wrong,
+# and the one it would replace is already correct.
+# Sets FETCH_REASON rather than printing, so the caller can name the reason on
+# the same line as the action it is taking.
+FETCH_REASON=""
+needs_fetch() {
+    local server_id=$1
+    local current="$FINGERPRINT_DIR/$server_id"
+    local recorded="$DATA_DIR/$server_id/fingerprint"
+
+    if [ ! -f "$recorded" ]; then
+        FETCH_REASON="no previous import recorded"
+        return 0
+    fi
+    if ! cmp -s "$current" "$recorded"; then
+        FETCH_REASON="settings changed since the last import"
+        return 0
+    fi
+    return 1
+}
+
 run_initial_fetch() {
     local server_id=$1 fetcher=$2 url_var=$3 token_var=$4 exclude_var=$5
     local url=${!url_var:-} token=${!token_var:-}
 
     [ -n "$url" ] && [ -n "$token" ] || return 0
 
-    echo "Fetching $server_id data..."
+    if ! needs_fetch "$server_id"; then
+        echo "Skipping $server_id fetch: settings unchanged since its last import."
+        return 0
+    fi
+
+    echo "Fetching $server_id data ($FETCH_REASON)..."
     if ! env "$exclude_var=${!exclude_var:-}" \
         python3 "/app/scripts/${fetcher}_data_fetcher.py" \
         --url "$url" --token "$token" --output "$DATA_DIR/$server_id"; then
         echo "Warning: initial $server_id fetch failed. The scheduled run will retry." >&2
+        # Deliberately no fingerprint written. Recording one here would assert
+        # that the data on disk came from these settings; the next restart would
+        # believe it, skip, and withhold the user's change with nothing on screen
+        # or in the log to say so.
+        return 0
     fi
+
+    # Only now. The fingerprint describes a completed import, not an attempted one.
+    cp "$FINGERPRINT_DIR/$server_id" "$DATA_DIR/$server_id/fingerprint"
+    echo "Recorded $server_id settings fingerprint."
 }
 
 echo "Running initial data fetch..."

@@ -55,21 +55,76 @@ questions here, and only the second one is interesting.
 
 ## The entrypoint contract
 
-`config/entrypoint.sh` is about 130 lines and does four things: migrate an old
-data layout, generate configuration, run an initial fetch, and start supervisord.
+`config/entrypoint.sh` does four things: migrate an old data layout, generate
+configuration, run an initial fetch **for each server that needs one**, and start
+supervisord.
 
 The generation step is delegated to `scripts/glimpse_config.py`, which resolves
-the environment and writes three files:
+the environment and writes three kinds of file:
 
 | File | What it is |
 | --- | --- |
 | `/app/web/config.json` | The container-to-frontend contract |
 | `/app/web/manifest.json` | The PWA manifest, themed for the primary server |
 | `/etc/cron.d/media-cron` | One scheduled fetch per configured server |
+| `/run/glimpse/fingerprints/<server>` | The current settings fingerprint, for the boot decision below |
 
-All three come from one resolution so that "which servers are configured" has a
+All of them come from one resolution so that "which servers are configured" has a
 single implementation — the old script answered it in three places and they
 drifted.
+
+### Which servers import at boot
+
+A restart used to re-import every configured library, and because supervisord
+starts **last**, the container refused connections on 9090 for the whole of it.
+Rebuilding to change nothing at all cost a full re-import of data already on the
+volume.
+
+Each server now records a fingerprint of the settings that produced its last
+successful import, at `data/<server>/fingerprint`. On boot the entrypoint
+compares that with the fingerprint of the current environment:
+
+| Recorded fingerprint | What happens |
+| --- | --- |
+| Matches | That server's fetch is skipped |
+| Differs | That server re-imports |
+| Absent | That server imports — a first install, or an upgrade to this version |
+
+The decision is per server, so adding Jellyfin to a Plex-only install imports
+Jellyfin without touching Plex.
+
+**Only three settings are fingerprinted**, per server: `<SERVER>_URL`,
+`<SERVER>_TOKEN` and `<SERVER>_EXCLUDE_LIBRARIES`. Those are the only ones that
+change what a snapshot *contains*. `APP_TITLE`, `TZ`, `PRIMARY_SERVER`,
+`SORT_BY_DATE_ADDED` and `CRON_SCHEDULE` change how it is displayed or when it is
+refreshed — they take effect on restart without an import, and re-importing a
+large library because someone renamed the app would be a regression.
+
+Two properties worth knowing:
+
+- **It is a hash, not the values.** `/app/data` is served by nginx and this app
+  has no authentication, so a file holding the token would be a credential
+  download for anyone who can reach the port.
+- **It is written only after an import succeeds.** A failed fetch records
+  nothing, so the next restart retries rather than skipping. Writing it up front
+  would assert the data came from the current settings, and a subsequent failure
+  would make that assertion false with nothing reporting it.
+
+**To force a re-import**, delete the fingerprint and restart:
+
+```bash
+rm data/plex/fingerprint && docker compose restart
+```
+
+That is per server, which "restart the container" never was. Deleting
+`data/<server>/movies.json` works too, but it is worse: it takes the library away
+while the import runs, which is exactly what the snapshot publishing below exists
+to avoid.
+
+The entrypoint still runs the fetches it decides on **before** supervisord, so a
+genuine first install is unavailable while its first import runs. That ordering
+did not need to change: once a restart skips its fetches there is nothing slow
+ahead of supervisord.
 
 ### `config.json`
 
@@ -110,6 +165,15 @@ how many times the container had started.
 route serves byte-identical markup. If something appears to require editing an
 authored file, that is a spec change to `application-shell`, not a wiring
 decision. See [CLAUDE.md](../CLAUDE.md).
+
+It also restarts the container twice, to check the boot decision in both
+directions: that a **failed** fetch records no fingerprint and is retried, and
+that a recorded one skips. Both are needed — asserting only the skip would pass
+for an implementation that records a fingerprint whatever the outcome, which is
+the defect the ordering exists to prevent. It checks a published snapshot is
+readable **over HTTP** rather than merely present, because a file whose mode is
+set after its rename is served as a `403` and looks nothing like a permissions
+bug from the browser.
 
 ### The server routes
 
@@ -166,12 +230,29 @@ Four things in `config/nginx.conf` are load-bearing:
 data/<server>/
 ├─ movies.json        # metadata for the movies grid
 ├─ tvshows.json       # metadata for the TV shows grid
+├─ fingerprint        # settings hash of the last successful import
 ├─ checksums.pkl      # MD5 per artwork file — what makes re-runs cheap
 ├─ posters/{movies,tvshows}/<id>.jpg
 └─ backdrops/{movies,tvshows}/<id>.jpg
 ```
 
-Two things to be careful with:
+Three things to be careful with:
+
+- **The snapshot is replaced whole, or not at all.** `movies.json` and
+  `tvshows.json` are written to `.movies.json.tmp` and `.tvshows.json.tmp`
+  alongside them, and renamed into place only once both are complete — see
+  `scripts/snapshot_io.py`. A reader therefore always gets the whole previous
+  snapshot or the whole new one, and a run that fails has changed nothing.
+
+  This replaced a `clean_existing_data()` that deleted both files as its *first*
+  act. The site reported `Failed to load movie data` for the entire duration of
+  every scheduled import, and a run that failed after that point left the library
+  deleted until a later one succeeded. Measured against a 25-item mock library:
+  1,902 of 2,092 reads during a run got a missing file, plus one caught
+  mid-truncation. After the change, 0 of 1,959.
+
+  The temp names are fixed rather than random so a killed run leaves one inert
+  file per target instead of a growing pile in a directory nginx serves.
 
 - **`checksums.pkl` is what stops every run re-downloading the library.**
   Invalidating it — a format change, a path change, a different id scheme — turns

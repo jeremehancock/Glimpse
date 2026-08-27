@@ -175,6 +175,62 @@ those tags.
   their APIs are compatible, which is why one fetcher already serves both. A fix
   applied to one that isn't applied to the other is a bug, and the reason
   library-exclusion had to be fixed twice.
+- **A refresh NEVER deletes what it is replacing.** `movies.json` and
+  `tvshows.json` are written to temp files beside them and renamed into place
+  once **both** are complete — `scripts/snapshot_io.py`, and nothing may write a
+  snapshot any other way. nginx serves that directory to a page that can load at
+  any instant, so a writer has to be correct at every moment of a run, not only
+  at the end of one.
+  - **The old code deleted both files as its FIRST act.** So every scheduled
+    import put the site into `Failed to load movie data` for its whole duration
+    — not down, *broken*, which is harder to recognise and much harder to
+    diagnose. Measured against a 25-item mock: **1,902 of 2,092 reads during a
+    run got a missing file**, plus one caught mid-truncation. After: 0 of 1,959.
+  - **That is also why a failed fetch used to destroy the library.** Both
+    fetchers give up early on several conditions and every one of those paths
+    ran *after* the delete, so a media server restarting when cron fired left an
+    empty library until a later run succeeded — indistinguishable from a server
+    with no media, the ambiguity this project refuses everywhere else. The
+    safety now comes from never having deleted anything, not from a restore
+    path: a restore only runs if the process survives to run it, and an OOM or a
+    killed container does not.
+  - **Set the mode on the TEMP file.** A rename carries the mode and owner the
+    temp had, so a mode fixed afterwards is fixed too late: the swap is flawless
+    and nginx answers **403**. `make test` has no web server, so
+    `tests/test_snapshot_publishing.py` forces a hostile umask to check it —
+    without that the assertion passes on a publisher that never sets the mode at
+    all, because the usual 022 umask produces 0644 by coincidence. It did.
+  - **Register a temp for cleanup BEFORE writing it, not after.** Registering on
+    the way out cleans up every temp except the one that failed — the only one
+    that is half-written.
+- **A restart re-imports a server only when its settings changed.** Each server
+  records a hash of its URL, token and exclusion list at
+  `data/<server>/fingerprint`, written **only after an import succeeds**. The
+  entrypoint `cmp`s it and skips the fetch on a match; a missing file and a
+  differing one take the same branch, so "never imported" needs no second
+  condition. `exec supervisord` stays on the last line — once a restart skips
+  its fetches there is nothing slow ahead of it.
+  - **Only those three settings, and the set is pinned in both directions.**
+    They are the only ones that change what a snapshot *contains*.
+    Re-importing a large library because someone changed `APP_TITLE` would be a
+    regression. `tests/test_fetch_fingerprint.py` fails when `Server` gains a
+    field, the same way `test_compose_surface.py` fails on a new variable and
+    for the same reason.
+  - **A hash, never the values, and `json.dumps` never a join.** `/app/data` is
+    served by nginx on an app with no login, so the token cannot go there. And a
+    URL and a library name both admit commas, so joined text collides — a
+    collision means a fingerprint that *matches when the settings differ*, which
+    silently withholds the user's change. Same call, same reason, as
+    `renderSignature()`.
+  - **Writing it before the fetch succeeds is the whole defect it prevents.** It
+    would assert the data came from the current settings; a subsequent failure
+    makes that false, and the next restart believes it, skips, and withholds the
+    change with nothing on screen or in the log to say so.
+  - **The fetchers had to start exiting non-zero first.** `main()` ignored what
+    `fetch_and_save_data()` returned, so the process exited 0 whether the fetch
+    worked or not — and the entrypoint's "initial fetch failed" warning had
+    never once run. Without that, every fingerprint would be recorded after a
+    failure too.
 - Artwork is re-downloaded only when its MD5 changes. The checksum store is
   per-server and lives on the mounted volume, so a first run after an upgrade
   must not invalidate it — that would re-download an entire library.

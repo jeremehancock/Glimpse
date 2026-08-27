@@ -26,6 +26,7 @@ reach it.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -88,6 +89,52 @@ class Server:
     def to_config(self) -> dict[str, str]:
         """The public shape. Credentials never reach the browser."""
         return {'id': self.id, 'name': self.name, 'dataPath': self.data_path}
+
+    def fetch_inputs(self) -> list[object]:
+        """Exactly the settings that determine what this server's snapshot holds.
+
+        Three, and adding a fourth is a decision rather than an oversight —
+        `tests/test_fetch_fingerprint.py` asserts this list's shape in both
+        directions so a new field on `Server` fails the gate until someone says
+        whether it belongs here.
+
+        What is deliberately absent is everything else the environment carries.
+        `APP_TITLE`, `TZ`, `PRIMARY_SERVER`, `SORT_BY_DATE_ADDED` and
+        `CRON_SCHEDULE` change how a snapshot is displayed or when it is
+        refreshed, never what is in it. Re-importing a whole library because
+        someone renamed the application would be a regression, not a safeguard.
+
+        The exclusion list is normalised the way the fetchers parse it — split on
+        commas, stripped, empties dropped, sorted — so this describes the
+        exclusion's *effect* and not its spelling. Reordering `A,B` to `B,A`
+        excludes the same libraries and must not cost a full re-import.
+        Normalising it differently from the fetchers would be worse than not
+        normalising at all: it would call two settings equivalent that are not.
+        """
+        excluded = sorted(
+            {entry.strip() for entry in self.exclude_libraries.split(',') if entry.strip()}
+        )
+        return [self.url, self.token, excluded]
+
+    def fingerprint(self) -> str:
+        """A hash of `fetch_inputs()`, for deciding whether a boot fetch is needed.
+
+        **A hash, never the values.** `/app/data` is served by nginx and this app
+        has no authentication, so a file holding the token would be a credential
+        download for anyone who can reach the port. A hash detects a change just
+        as reliably and discloses nothing.
+
+        **`json.dumps` of a list, never a delimiter join.** A URL and a library
+        name both admit commas and spaces, so joined text collides: `'a,b'` with
+        `'c'` and `'a'` with `'b,c'` produce the same string. A collision here is
+        a fingerprint that matches when the settings differ, which silently
+        withholds the user's change until a scheduled run happens to fire — the
+        one direction this must never be wrong in. The frontend's
+        `renderSignature()` is stringified rather than joined for exactly this
+        reason.
+        """
+        payload = json.dumps(self.fetch_inputs(), separators=(',', ':'))
+        return hashlib.sha256(payload.encode('utf-8')).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -317,6 +364,25 @@ def write_files(resolved: Resolved, output_dir: Path) -> None:
     _write_json(output_dir / 'manifest.json', resolved.manifest_json())
 
 
+def write_fingerprints(resolved: Resolved, fingerprint_dir: Path) -> None:
+    """Write the CURRENT fingerprint of each configured server, one file each.
+
+    These are what the entrypoint compares against the fingerprints recorded
+    under `/app/data/<server>/`, to decide per server whether a boot fetch is
+    needed. One file per server rather than one file listing all of them, so the
+    comparison in shell is `cmp` against a path and never a parse.
+
+    The destination is expected to be somewhere ephemeral — the entrypoint uses
+    `/run`. These are derived fresh from the environment on every boot and must
+    not persist; only the *recorded* fingerprint, on the mounted volume, survives
+    a restart. A stale copy of this side would answer "unchanged" for settings
+    that had in fact changed.
+    """
+    fingerprint_dir.mkdir(parents=True, exist_ok=True)
+    for server in resolved.servers:
+        (fingerprint_dir / server.id).write_text(server.fingerprint(), encoding='utf-8')
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description='Generate config.json and manifest.json from the environment.'
@@ -332,6 +398,12 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=None,
         help='Also write the generated crontab to this path',
+    )
+    parser.add_argument(
+        '--fingerprint-dir',
+        type=Path,
+        default=None,
+        help="Also write each configured server's current settings fingerprint here",
     )
     args = parser.parse_args(argv)
 
@@ -354,6 +426,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.crontab is not None:
             args.crontab.write_text(resolved.crontab(), encoding='utf-8')
             args.crontab.chmod(0o644)
+        if args.fingerprint_dir is not None:
+            write_fingerprints(resolved, args.fingerprint_dir)
     except OSError as exc:
         print(f'Error: could not write configuration to {args.output}: {exc}', file=sys.stderr)
         return 1

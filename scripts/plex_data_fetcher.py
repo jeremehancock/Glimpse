@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import requests
-import json
 import os
 import sys
 from pathlib import Path
@@ -12,6 +11,8 @@ import pwd
 import grp
 import hashlib
 import pickle
+
+import snapshot_io
 
 class PlexDataFetcher:
     def __init__(self, plex_url, plex_token, output_dir="data", page_size=100, excluded_libraries=None):
@@ -82,18 +83,25 @@ class PlexDataFetcher:
             directory.mkdir(parents=True, exist_ok=True)
             self.set_permissions(directory)
 
-    def clean_existing_data(self):
-        """Remove existing JSON files to ensure clean data"""
+    def publish_snapshots(self, movies_data, tvshows_data):
+        """Publish both snapshots, or neither.
+
+        There is deliberately no counterpart that removes them first. This used
+        to open a run by deleting movies.json and tvshows.json, so the site
+        reported "Failed to load movie data" for the whole import and a run that
+        gave up part way left the library deleted until a later one succeeded.
+        See scripts/snapshot_io.py.
+        """
         movies_file = self.output_dir / "movies.json"
         tvshows_file = self.output_dir / "tvshows.json"
-        
-        for file_path in [movies_file, tvshows_file]:
-            if file_path.exists():
-                try:
-                    file_path.unlink()
-                    print(f"Removed existing file: {file_path}")
-                except Exception as e:
-                    print(f"Warning: Could not remove {file_path}: {e}")
+
+        print(f"\nSaving {len(movies_data)} movies to: {movies_file}")
+        print(f"Saving {len(tvshows_data)} TV shows to: {tvshows_file}")
+
+        snapshot_io.publish_json(
+            [(movies_file, movies_data), (tvshows_file, tvshows_data)],
+            prepare=self.set_permissions,
+        )
 
     def is_library_excluded(self, library_name, library_id):
         """Check if a library should be excluded based on name or ID"""
@@ -352,21 +360,27 @@ class PlexDataFetcher:
             return None
 
     def fetch_and_save_data(self):
-        """Main method to fetch all data and save it"""
+        """Fetch all data and save it. Returns True on success, False on failure.
+
+        The return value is load-bearing: the entrypoint records a settings
+        fingerprint only after a fetch that succeeded, so that a failed one is
+        retried on the next start rather than skipped. Returning False here is
+        what becomes a non-zero exit status in main().
+        """
         print(f"Starting Plex data fetch at {datetime.now()}")
-        
+
         if self.excluded_libraries:
             print(f"Excluded libraries: {', '.join(self.excluded_libraries)}")
-        
-        # Clean existing data files
-        self.clean_existing_data()
-        
+
+        # Nothing is removed here. The previous snapshot stays published and
+        # served until a complete new one is ready to replace it.
+
         # Get all sections
         sections_data = self.fetch_sections()
         if not sections_data or 'MediaContainer' not in sections_data:
             print("Failed to fetch sections")
-            return
-        
+            return False
+
         sections = sections_data['MediaContainer'].get('Directory', [])
         
         movies_data = []
@@ -435,27 +449,17 @@ class PlexDataFetcher:
                 # Add a small delay between items to reduce server load
                 time.sleep(0.1)
         
-        # Save JSON files
-        movies_file = self.output_dir / "movies.json"
-        tvshows_file = self.output_dir / "tvshows.json"
-        
-        print(f"\nSaving {len(movies_data)} movies to: {movies_file}")
-        with open(movies_file, 'w') as f:
-            json.dump(movies_data, f, indent=2)
-        self.set_permissions(movies_file)
-        
-        print(f"Saving {len(tvshows_data)} TV shows to: {tvshows_file}")
-        with open(tvshows_file, 'w') as f:
-            json.dump(tvshows_data, f, indent=2)
-        self.set_permissions(tvshows_file)
-        
+        # Publish both snapshots together, replacing the previous pair
+        self.publish_snapshots(movies_data, tvshows_data)
+
         # Save checksums
         self.save_checksums()
-        
+
         print(f"\nData fetch completed at {datetime.now()}")
         print(f"Movies: {len(movies_data)}")
         print(f"TV Shows: {len(tvshows_data)}")
         print(f"Data saved to: {self.output_dir}")
+        return True
 
 def main():
     # Get values from environment variables first
@@ -496,7 +500,11 @@ def main():
         sys.exit(1)
     
     fetcher = PlexDataFetcher(args.url, args.token, args.output, args.page_size, args.exclude_libraries)
-    fetcher.fetch_and_save_data()
+    # Exit non-zero on failure. The caller has to be able to tell a fetch that
+    # worked from one that did not: the entrypoint records a settings
+    # fingerprint only after a success, and cron logs one that failed.
+    if not fetcher.fetch_and_save_data():
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

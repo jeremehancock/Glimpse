@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import requests
-import json
 import os
 import sys
 from pathlib import Path
@@ -12,6 +11,8 @@ import pwd
 import grp
 import hashlib
 import pickle
+
+import snapshot_io
 
 class JellyfinDataFetcher:
     def __init__(self, jellyfin_url, jellyfin_token, output_dir="data/jellyfin", page_size=100, excluded_libraries=None):
@@ -82,18 +83,26 @@ class JellyfinDataFetcher:
             directory.mkdir(parents=True, exist_ok=True)
             self.set_permissions(directory)
 
-    def clean_existing_data(self):
-        """Remove existing JSON files to ensure clean data"""
+    def publish_snapshots(self, movies_data, tvshows_data):
+        """Publish both snapshots, or neither.
+
+        There is deliberately no counterpart that removes them first. This used
+        to open a run by deleting movies.json and tvshows.json, so the site
+        reported "Failed to load movie data" for the whole import and a run that
+        gave up part way — the `if not user_id` below is the one that reached
+        users — left the library deleted until a later one succeeded.
+        See scripts/snapshot_io.py.
+        """
         movies_file = self.output_dir / "movies.json"
         tvshows_file = self.output_dir / "tvshows.json"
-        
-        for file_path in [movies_file, tvshows_file]:
-            if file_path.exists():
-                try:
-                    file_path.unlink()
-                    print(f"Removed existing file: {file_path}")
-                except Exception as e:
-                    print(f"Warning: Could not remove {file_path}: {e}")
+
+        print(f"\nSaving {len(movies_data)} movies to: {movies_file}")
+        print(f"Saving {len(tvshows_data)} TV shows to: {tvshows_file}")
+
+        snapshot_io.publish_json(
+            [(movies_file, movies_data), (tvshows_file, tvshows_data)],
+            prepare=self.set_permissions,
+        )
 
     def is_library_excluded(self, library_name, library_id):
         """Check if a library should be excluded based on name or ID"""
@@ -373,31 +382,37 @@ class JellyfinDataFetcher:
             return None
 
     def fetch_and_save_data(self):
-        """Main method to fetch all data and save it"""
+        """Fetch all data and save it. Returns True on success, False on failure.
+
+        The return value is load-bearing: the entrypoint records a settings
+        fingerprint only after a fetch that succeeded, so that a failed one is
+        retried on the next start rather than skipped. Returning False here is
+        what becomes a non-zero exit status in main().
+        """
         print(f"Starting Jellyfin data fetch at {datetime.now()}")
         print(f"Jellyfin URL: {self.jellyfin_url}")
-        
+
         if self.excluded_libraries:
             print(f"Excluded libraries: {', '.join(self.excluded_libraries)}")
-        
-        # Clean existing data files
-        self.clean_existing_data()
-        
+
+        # Nothing is removed here. The previous snapshot stays published and
+        # served until a complete new one is ready to replace it.
+
         # Get user ID
         user_id = self.get_user_id()
         if not user_id:
             print("Failed to get user ID")
-            return
-        
+            return False
+
         print(f"Using user ID: {user_id}")
-        
+
         # Get all libraries
         libraries_data = self.fetch_libraries(user_id)
         if not libraries_data or 'Items' not in libraries_data:
             print("Failed to fetch libraries")
             print(f"Libraries response: {libraries_data}")
-            return
-        
+            return False
+
         libraries = libraries_data['Items']
         print(f"Found {len(libraries)} libraries")
         
@@ -470,36 +485,29 @@ class JellyfinDataFetcher:
                 else:
                     print(f"Failed to process media info for: {item.get('Name', 'Unknown')}")
         
-        # Save JSON files
-        movies_file = self.output_dir / "movies.json"
-        tvshows_file = self.output_dir / "tvshows.json"
-        
-        print(f"\nSaving {len(movies_data)} movies to: {movies_file}")
-        with open(movies_file, 'w') as f:
-            json.dump(movies_data, f, indent=2)
-        self.set_permissions(movies_file)
-        
-        print(f"Saving {len(tvshows_data)} TV shows to: {tvshows_file}")
-        with open(tvshows_file, 'w') as f:
-            json.dump(tvshows_data, f, indent=2)
-        self.set_permissions(tvshows_file)
-        
+        # Publish both snapshots together, replacing the previous pair
+        self.publish_snapshots(movies_data, tvshows_data)
+
         # Save checksums
         self.save_checksums()
-        
+
+        movies_file = self.output_dir / "movies.json"
+        tvshows_file = self.output_dir / "tvshows.json"
+
         print(f"\nData fetch completed at {datetime.now()}")
         print(f"Movies: {len(movies_data)}")
         print(f"TV Shows: {len(tvshows_data)}")
         print(f"Data saved to: {self.output_dir}")
-        
+
         # List the files that were created
         print(f"\nFiles created:")
         if movies_file.exists():
             print(f"✓ {movies_file} ({movies_file.stat().st_size} bytes)")
         if tvshows_file.exists():
             print(f"✓ {tvshows_file} ({tvshows_file.stat().st_size} bytes)")
-        
+
         print(f"\nDirectory contents: {list(self.output_dir.iterdir())}")
+        return True
 
 def main():
     # Get values from environment variables first
@@ -540,7 +548,11 @@ def main():
         sys.exit(1)
     
     fetcher = JellyfinDataFetcher(args.url, args.token, args.output, args.page_size, args.exclude_libraries)
-    fetcher.fetch_and_save_data()
+    # Exit non-zero on failure. The caller has to be able to tell a fetch that
+    # worked from one that did not: the entrypoint records a settings
+    # fingerprint only after a success, and cron logs one that failed.
+    if not fetcher.fetch_and_save_data():
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
