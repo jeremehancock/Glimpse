@@ -292,13 +292,31 @@
             transition: all var(--transition-speed);
         }
 
+        /* The resting label colour is declared here, not inherited. `.tab` is a
+           <div> so inheritance gives the same white — but the rule that sets
+           this label's colour when selected is `.tab.active`, and a reader who
+           opens the base rule to find the other half has to already know the
+           answer to work out that there isn't one.
+
+           `color` is deliberately absent from the transition, and that is why
+           the transition names its properties instead of saying `all`. The two
+           fills sit at opposite ends of the brightness range, so their labels
+           do too: white on `--tab-bg`, black on the accent. Easing both
+           together does not fade one legible state into another — it drives the
+           text through mid-grey at the same rate it drives the pill through
+           mid-accent, and mid-grey on Plex yellow is barely readable. It is
+           worst on DEselection, where the label goes light while the pill is
+           still yellow. `all` is how `color` got in: nobody wrote it down, and
+           it would do the same to the next property added here. */
         .tab {
             padding: 8px 18px;
             cursor: pointer;
             background-color: var(--tab-bg);
+            color: var(--light-text);
             border: none;
             border-radius: 20px;
-            transition: all var(--transition-speed);
+            transition: background-color var(--transition-speed),
+                box-shadow var(--transition-speed);
             white-space: nowrap;
             font-weight: 500;
             font-size: 0.9rem;
@@ -403,6 +421,9 @@
             margin-left: 10px;
         }
 
+        /* Same crossing as `.tab`, same reason `color` is not transitioned and
+           the properties are named rather than `all` — see that rule. These two
+           already declared their resting label colour. */
         .sort-button,
         .genre-button {
             padding: 6px 12px;
@@ -410,7 +431,7 @@
             background-color: var(--tab-bg);
             border: none;
             border-radius: 20px;
-            transition: all var(--transition-speed);
+            transition: background-color var(--transition-speed);
             white-space: nowrap;
             font-weight: 500;
             font-size: 0.9rem;

@@ -368,6 +368,21 @@ those tags.
     are hover-and-fine-pointer only, so a reason attached to one is a reason no
     touch user ever receives. A control with nothing to offer is usually an
     *empty* destination rather than a dead one — prefer opening it and saying so.
+- **A control that crosses between the neutral fill and the accent fill switches
+  its label colour — it never eases it.** The two fills sit at opposite ends of
+  the brightness range, so their labels do too: white on `--tab-bg`, black on the
+  accent. Easing both together does not fade one legible state into another. It
+  drives the text through mid-grey at the same rate it drives the pill through
+  mid-accent, and mid-grey on Plex yellow is barely readable. Worst on
+  *de*selection, where the label goes light while the pill is still yellow.
+  - **`transition: all` is how `color` got in, on all three pills, unwritten.**
+    Name the properties. `all` also enrols whatever declaration is added to the
+    rule next, including a layout property — the expensive kind.
+  - It is the 300ms that made it a test rather than something a human catches:
+    it exists only on the frames between two correct states, so every
+    screenshot ever taken of these controls shows them resting and fine.
+    `tests/test_pill_contrast.py` pins the source decision; verify the picture
+    with DevTools animation playback slowed to 10–25%, in **both** directions.
 - **The media grid renders a WINDOW near the viewport, never the library.** A
   library is data; a grid is a rendering of part of it. Rendering every item tied
   the browser's per-frame cost to how much media a user owns, so the app got
