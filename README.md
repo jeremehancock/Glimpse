@@ -264,6 +264,7 @@ Glimpse/
 │
 ├── scripts/
 │   ├── glimpse_config.py     # Resolves the environment into config.json at startup
+│   ├── snapshot_io.py        # Publishes a snapshot whole, so the site stays up during an import
 │   ├── plex_data_fetcher.py  # Python script to fetch Plex data
 │   └── jellyfin_data_fetcher.py # Python script to fetch Jellyfin/Emby data
 │
