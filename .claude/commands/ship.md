@@ -88,7 +88,7 @@ matches. Common triggers — treat as prompts to go read, not a whitelist:
 | `docker-compose.yml`, or anything that reads an env var it names | The README config tables **and** the frozen-compose rule in `CLAUDE.md`. An existing user's compose file must still run the app unchanged. |
 | `config/entrypoint.sh` or the `config.json` contract | `docs/docker.md` (the config.json schema) and the README "How It Works" section |
 | `scripts/` — the fetchers, the snapshot schema, exclusions | README "Manual Data Update", "Library Exclusion", and the project-structure tree |
-| `web/` — features, layout, overlays, the PWA | README feature list and screenshots in `assets/` |
+| `web/` — features, layout, overlays, the PWA | README feature list |
 | `.github/workflows/*` (CI/publish behavior, tags, release flow) | `docs/development-workflow.md` (Branches & tags, Promoting & releasing) and the README "Docker images" section |
 | `Makefile`, `pyproject.toml`, `package.json` (the quality gates) | the toolchain commands in `docs/development-workflow.md` and the gate section of `CLAUDE.md` |
 | `.claude/commands/*` or the OpenSpec flow | the command tables in `docs/development-workflow.md`, and the `/ship` section of `CLAUDE.md` |
