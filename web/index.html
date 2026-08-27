@@ -292,13 +292,44 @@
             transition: all var(--transition-speed);
         }
 
+        /* The resting label colour is declared here, not inherited. `.tab` is a
+           <div> so inheritance gives the same white — but the rule that sets
+           this label's colour when selected is `.tab.active`, and a reader who
+           opens the base rule to find the other half has to already know the
+           answer to work out that there isn't one.
+
+           THERE IS NO TRANSITION ON THIS CONTROL, AND THAT IS THE FIX.
+
+           The fill and the label are one pair. The two fills sit at opposite
+           ends of the brightness range so their labels do too — white on
+           `--tab-bg`, black on the accent — which means either one arriving
+           without the other leaves the pill wearing the wrong label. There is
+           no ordering that escapes it, and all three were shipped:
+
+             `transition: all`  — both eased together, so the text crossed
+               mid-grey while the pill crossed mid-accent. Barely readable on
+               Plex yellow, in both directions.
+             fill eased, label snapped — DEselecting put a fully white label on
+               a fully yellow pill on the first frame and held it while the
+               yellow drained. Worse than what it replaced, and it is what a
+               user reported. Selecting had the mirror flaw, black on `#333`,
+               which reads as dim rather than wrong and so went unnoticed.
+             label eased, fill snapped — the same thing again, reflected.
+
+           So they change on the same frame, which for CSS means neither is
+           transitioned. A selected state is a state, not an animation: the
+           motion on a tab click belongs to the page slide, not to the pill.
+
+           This is also why `transition: all` must not come back. `color` was
+           never chosen for that fade — `all` swept it in, unwritten, and would
+           do the same to whatever is added to this rule next. */
         .tab {
             padding: 8px 18px;
             cursor: pointer;
             background-color: var(--tab-bg);
+            color: var(--light-text);
             border: none;
             border-radius: 20px;
-            transition: all var(--transition-speed);
             white-space: nowrap;
             font-weight: 500;
             font-size: 0.9rem;
@@ -403,6 +434,9 @@
             margin-left: 10px;
         }
 
+        /* Same crossing as `.tab`, same reason there is no transition here —
+           see that rule. These two already declared their resting label
+           colour. */
         .sort-button,
         .genre-button {
             padding: 6px 12px;
@@ -410,7 +444,6 @@
             background-color: var(--tab-bg);
             border: none;
             border-radius: 20px;
-            transition: all var(--transition-speed);
             white-space: nowrap;
             font-weight: 500;
             font-size: 0.9rem;
