@@ -14,6 +14,16 @@ from pathlib import Path
 
 import pytest
 
+from contrast import (
+    CONTROL_BAR,
+    WHITE,
+    composite,
+    contrast_ratio,
+    declared_token,
+    declared_value,
+    parse_hex,
+)
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WEB = REPO_ROOT / 'web'
 INDEX = WEB / 'index.html'
@@ -461,26 +471,77 @@ def test_the_backdrop_artwork_cannot_reach_the_scrolling_region(html):
     assert not re.search(r'height:\s*\d', rule.group(1)), 'the artwork has a fixed height again'
 
 
-def test_the_backdrop_artwork_does_not_cover_the_grab_handle(html):
-    """The handle is the only affordance that dismisses a tray, and it was
-    rendering on top of the item's artwork."""
+def test_the_grab_handle_is_legible_on_both_surfaces_it_lands_on(html):
+    """BOTH surfaces, in one assertion, because checking one is the defect.
+
+    The handle can be drawn over two things: an overlay's own panel surface,
+    which is every tray in the app, and the detail overlay's backdrop artwork
+    composited over that same surface. It was `#4b4f57`, which is 1.75:1 against
+    plain surface — below the 3:1 bar for a control, on every tray, for as long
+    as there have been trays.
+
+    That went unseen because the one place anyone had looked at this handle was
+    the detail overlay, the only one with a picture behind it, and there the
+    artwork was masked away from behind the handle. So the handle was never
+    legible BECAUSE of that mask; it was legible in spite of being the wrong
+    colour, in one overlay, by having its background deleted. The mask is gone
+    and the colour carries itself now.
+
+    Note the direction that makes the pair real: dimming the artwork moved the
+    composite TOWARD a mid-grey handle, so the change that fixed the text made
+    this worse. Contrast is a relation between two colours, not a fact about
+    either, which is why both moved in one commit.
+    """
     css = strip_comments(html)
-    rule = re.search(r'\.modal-backdrop-art\s*\{([^}]*)\}', css)
-    assert rule
-    # Both spellings. The unprefixed property alone leaves older WebKit — which
-    # is to say a large share of the phones this tray shape exists for — showing
-    # the handle on top of the picture, and that is the one browser where the
-    # handle is the only way to dismiss.
-    assert 'mask-image' in rule.group(1), 'the artwork runs under the grab handle'
-    assert '-webkit-mask-image' in rule.group(1), (
-        'no prefixed mask, so older WebKit still draws artwork under the handle'
+    overlays = strip_comments((WEB / 'assets' / 'overlays.css').read_text())
+    tokens = strip_comments((WEB / 'assets' / 'tokens.css').read_text())
+
+    handle = parse_hex(declared_value(overlays, '.sheet__handle', 'background'))
+    surface = parse_hex(declared_token(tokens, '--surface'))
+    opacity = float(declared_value(css, '.modal-backdrop-art', 'opacity'))
+
+    over_surface = contrast_ratio(handle, surface)
+    assert over_surface >= CONTROL_BAR, (
+        f'the grab handle is {over_surface:.2f}:1 on a plain tray, below '
+        f'{CONTROL_BAR}:1. On touch it is the only affordance that dismisses a '
+        f'tray by gesture.'
     )
-    assert '--grip-height' in rule.group(1), (
-        'the fade distance is hardcoded rather than tied to the grip, so the '
-        'two drift the first time the grip padding changes'
+
+    over_artwork = contrast_ratio(handle, composite(WHITE, surface, opacity))
+    assert over_artwork >= CONTROL_BAR, (
+        f'the grab handle is {over_artwork:.2f}:1 over the brightest backdrop '
+        f'artwork, below {CONTROL_BAR}:1. Do not fix this by masking the '
+        f'artwork away behind it — that is what made the handle unverified on '
+        f'every other tray.'
     )
-    tokens = (WEB / 'assets' / 'tokens.css').read_text()
-    assert '--grip-height:' in tokens, 'the grip height token is not declared'
+
+
+def test_every_tray_wears_the_same_handle(html):
+    """One component, not one per overlay.
+
+    Two trays are almost never on screen together, so a divergence here would
+    never be noticed — it would simply drift, the same way `.sheet__head` and
+    `.modal__head` drifted to 14px and 16px of padding while nothing said they
+    were related. The colour is declared once and scoped to nothing.
+    """
+    overlays = strip_comments((WEB / 'assets' / 'overlays.css').read_text())
+    css = strip_comments(html)
+
+    declarations = re.findall(r'([^{}]*\.sheet__handle[^{}]*)\{([^}]*)\}', overlays + css)
+    painted = [
+        (selector.strip(), body)
+        for selector, body in declarations
+        if re.search(r'(?<![-\w])background(?:-color)?\s*:', body)
+    ]
+    assert len(painted) == 1, (
+        f'the grab handle is painted by {len(painted)} rules '
+        f'({[selector for selector, _ in painted]}). It is one control; an '
+        f'overlay dressing its own copy differently is how the two drift.'
+    )
+    assert painted[0][0] == '.sheet__handle', (
+        f'the handle colour is scoped to `{painted[0][0]}`, so it applies to '
+        f'some trays and not others'
+    )
 
 
 def test_the_drag_gesture_selectors_all_exist_in_the_markup(html):

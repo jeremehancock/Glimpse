@@ -1045,55 +1045,69 @@
            into the scrolling body, so the summary and cast slid underneath a
            stationary picture. Filling its container instead makes the artwork's
            extent a consequence of the layout rather than a constant that has to
-           be re-guessed for every viewport. */
+           be re-guessed for every viewport.
+
+           ONE STRENGTH FOR THE WHOLE REGION. No mask, no fade, no inset — what
+           a reader sees at the panel's top edge is what they see beside the
+           poster. There WAS a mask here, a gradient holding the artwork
+           transparent across the grab handle, and it is gone with the tokens
+           that described it; see .sheet__handle in overlays.css for what
+           replaced it.
+
+           0.10 IS DERIVED, NOT CHOSEN. It is the strongest artwork over which
+           --muted-text (#aaa) still clears 4.5:1 against the worst case, and
+           the worst case is a fully white image rather than a typical one —
+           which image is behind the text is decided by the user's library, so a
+           number tuned to the average backdrop fails for somebody, silently,
+           with nothing on screen to say the app meant otherwise:
+
+               opacity   composite over #2a2a2a   #aaa over it
+               0.35      #757575                  2.00:1   <- what shipped
+               0.20      #555555                  3.23:1
+               0.12      #444444                  4.22:1
+               0.10      #3f3f3f                  4.51:1   <- here
+               0.08      #3b3b3b                  4.82:1
+
+           The title survived at 0.35 because it is white (4.64:1). The year and
+           the metadata pills did not, and they are what was reported: the panel
+           does not look broken, the small print looks soft, and only on some
+           items. Measure the bar against the DIMMEST text over the artwork, not
+           against the title.
+
+           The thin margin at 0.10 is the point — one step further throws away
+           picture the requirement does not ask for. tests/test_overlay_layering
+           recomputes this from the CSS, so a later edit to --muted-text, to
+           --surface, or to this number fails rather than drifting.
+
+           And note the direction: dimming the artwork moves the background
+           TOWARD a mid-grey handle, so this change made the handle's contrast
+           worse and had to travel with the handle's own colour. Contrast is a
+           relation between two things; moving one alone only moves the bad
+           case. */
         .modal-backdrop-art {
             position: absolute;
             inset: 0;
             background-size: cover;
             background-position: center center;
-            opacity: 0.35;
+            opacity: 0.1;
             z-index: 0;
             pointer-events: none;
-            /* Stay clear of the grab handle. The artwork still reaches the
-               panel's top edge — the full-bleed look is the point — but the
-               handle is the one affordance that dismisses a tray, and it was
-               rendering on top of a picture.
-
-               Note the FIRST stop holds transparent all the way to
-               --grip-clear, and only then fades. The earlier version ramped
-               straight from `transparent 0` to opaque at --grip-height, which
-               is the handle's LOWER edge — so the handle sat in the tail of the
-               ramp under artwork at 71-100% opacity. Clearing a region means
-               being clear across the whole of it and then some, not arriving at
-               clear by the time you reach its far side.
-
-               Moving the artwork's top down instead would leave a hard band of
-               bare surface above it, which reads as a gap rather than a design.
-
-               This is one half of the fix. Paint order is the other: the
-               artwork is positioned and the grip is not, so the artwork covers
-               it whatever the mask says. See `.modal__fixed .sheet__grip`.
-
-               A browser honouring neither property still has the grip lifted
-               above the artwork, so it degrades to a handle on a picture —
-               imperfect, but not invisible. */
-            -webkit-mask-image: linear-gradient(to bottom,
-                    transparent 0,
-                    transparent var(--grip-clear),
-                    #000 calc(var(--grip-clear) + var(--grip-height)));
-            mask-image: linear-gradient(to bottom,
-                    transparent 0,
-                    transparent var(--grip-clear),
-                    #000 calc(var(--grip-clear) + var(--grip-height)));
         }
 
         /* Lift the grab handle above the item's artwork.
            `.modal-backdrop-art` is positioned with `z-index: 0` and the grip is
            in normal flow, so paint order puts the artwork on top regardless of
-           its opacity — the mask above was the only thing holding the line, and
-           it was miscalibrated. Both halves are needed: the mask alone loses to
-           paint order, and this alone leaves a grey handle on an arbitrary
-           photograph, making legibility a property of which item was opened.
+           its opacity. Without this the handle is not dim, it is BEHIND the
+           picture.
+
+           Still one of two halves, but the other half moved. It used to be the
+           mask above, which removed the artwork from behind the handle; it is
+           now the handle's own colour, which clears 3:1 over the artwork as
+           well as over bare surface. The difference is where the responsibility
+           sits: clearing the background is arranged by whichever overlay owns
+           that background, so it held here and was simply absent on every other
+           tray — where the same handle was at 1.75:1 the whole time.
+
            `.modal-header` already does exactly this, for the same reason. */
         .modal__fixed .sheet__grip {
             position: relative;

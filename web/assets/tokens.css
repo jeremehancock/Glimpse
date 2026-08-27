@@ -36,24 +36,20 @@
     --backdrop-blur: blur(6px);
 
     /* --- Overlay metrics ----------------------------------------------------
-       The grab handle's total height: .sheet__grip's top padding plus
-       .sheet__handle itself. A token because two files need to agree on it —
-       overlays.css draws the grip, and the detail overlay's artwork fades itself
-       out over exactly this distance so the handle never sits on a picture. Two
-       hardcoded 17s would drift the first time the grip's padding changed, and
-       the symptom would be an illegible handle on bright artwork only. */
-    --grip-height: 17px;
+       THERE ARE NO GRIP METRICS HERE, AND THERE WERE TWO. `--grip-height` and
+       `--grip-clear` described the distance over which the detail overlay's
+       artwork faded itself out so the grab handle never sat on a picture. That
+       fade is gone: the handle now clears 3:1 by its own colour, over artwork
+       and over bare surface alike, which is stated once at .sheet__handle in
+       overlays.css and holds for every tray rather than for the one overlay
+       that had a background to remove.
 
-    /* How far artwork behind a grab handle must stay CLEAR of it.
-       `--grip-height` is the handle's lower edge, so a fade that reaches full
-       opacity there covers the handle itself: the handle occupies the last 5px
-       of that distance, where the artwork is already 71% opaque. Ending the fade
-       at the edge of the thing being protected is the bug this token exists to
-       stop coming back.
-       Derived, never restated as a second literal — the whole reason
-       `--grip-height` is a token is that two hand-copied values drift, and the
-       symptom is an illegible handle on bright artwork only. */
-    --grip-clear: calc(var(--grip-height) + 6px);
+       They are deleted rather than left declared because nothing reads them,
+       and a token with no reader is the shape of dead code this project has
+       shipped before — it looks like a live decision to everyone who finds it.
+       Re-adding the mask therefore has to re-add these too, which is the point:
+       tests/test_overlay_layering.py fails if either name reappears under
+       web/. */
 
     /* --- Radii --- */
     --radius-sm: 6px;
