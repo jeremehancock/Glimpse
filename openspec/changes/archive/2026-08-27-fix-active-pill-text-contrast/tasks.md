@@ -43,19 +43,19 @@
 Group 5 supersedes tasks 1.2–1.4 and 2.4; these remain as authored so the
 record of what was tried is not rewritten. Verify against group 5.
 
-- [ ] 3.1 Serve the app locally and, with DevTools animation playback slowed to
+- [x] 3.1 Serve the app locally and, with DevTools animation playback slowed to
       10–25%, watch a tab **selection** on the Plex palette. The label must be
       black from the first frame, on an already-accent fill.
-- [ ] 3.2 Watch a tab **deselection** at the same speed. This is the reported
+- [x] 3.2 Watch a tab **deselection** at the same speed. This is the reported
       direction: the label must be white from the first frame and must never
       sit light on a still-yellow pill.
-- [ ] 3.3 Sample the computed `color` across several frames of the change rather
+- [x] 3.3 Sample the computed `color` across several frames of the change rather
       than at one point — a single sample passes for a transition that has not
       started moving yet.
-- [ ] 3.4 Repeat 3.1 and 3.2 for a sort pill and a genre pill.
-- [ ] 3.5 Check the Jellyfin and Emby palettes by switching `data-server` on
+- [x] 3.4 Repeat 3.1 and 3.2 for a sort pill and a genre pill.
+- [x] 3.5 Check the Jellyfin and Emby palettes by switching `data-server` on
       `<html>` in DevTools; the crossing must be clean in each.
-- [ ] 3.6 Confirm the pill's fill and label step on the **same frame** in both
+- [x] 3.6 Confirm the pill's fill and label step on the **same frame** in both
       directions. Sample the computed `color` and `background-color` together,
       not one of them.
 
