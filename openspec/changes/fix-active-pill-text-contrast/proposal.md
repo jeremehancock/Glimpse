@@ -12,15 +12,27 @@ for the same reason.
 ## What Changes
 
 - A pill control that switches between the neutral fill and the accent fill
-  changes its label colour **instantly**. The fill still eases; the text does
-  not, so the label is legible at every point in the change.
+  changes **both together, on the same frame**. Neither the fill nor the label
+  is transitioned, so the pill never wears a label that does not belong to it.
 - `.tab` states its own resting colour instead of inheriting it, so the rule
   that governs the label is the rule that reads as governing it.
-- `transition: all` is replaced on these three controls with the properties
-  they actually animate. `all` is what swept `color` into the fade in the first
-  place, and it silently enrolls every property added later.
+- `transition: all` goes, and with both halves of the pair barred there is
+  nothing left for these rules to animate, so they declare no transition at all.
+  `all` is what swept `color` into the fade in the first place, and it silently
+  enrolls every property added later.
+- The hover tint becomes instant, as a consequence: hover and selection share
+  one `background-color`, and CSS cannot tell them apart.
 - A test pins the shape: no rule that toggles the accent fill may transition
-  `color`. CI has no browser, so the source decision is what can be guarded.
+  either half of the pair. CI has no browser, so the source decision is what can
+  be guarded.
+
+**An earlier version of this change eased the fill and switched only the label.
+It shipped to `:dev` and a user reported the result** — deselecting a tab put a
+fully white label on a fully yellow pill for the length of the fade, which is
+worse than the defect it replaced. Contrast is a relation between two
+properties, not a fact about either, so moving one of them alone only reflects
+the bad window. `design.md` records all three orderings and why only "both
+together" works.
 
 Out of scope, deliberately:
 

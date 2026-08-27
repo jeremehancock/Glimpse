@@ -5,12 +5,19 @@ button — switch between the neutral fill and the accent fill by toggling
 `.active`. Their labels sit at opposite ends of the brightness range because
 their fills do: white on `--tab-bg`, black on the accent.
 
-The defect this pins out: `transition: all` swept `color` into the fade, so
-selecting a tab drove its label from white to black over the same 300ms that
-drove its pill from `#333` to `#e5a00d`. Halfway through, the label is mid-grey
-and the pill is still substantially accent-coloured, and mid-grey on Plex yellow
-is barely readable. Deselection is worse — the label goes light while the pill
-is still yellow, which is how it was reported: white text on the yellow button.
+The fill and the label are one pair, and neither may ease. Three arrangements
+were shipped before that was understood, and each one leaves the pill wearing
+the wrong label for the duration:
+
+  `transition: all` — both eased together, so the text crossed mid-grey while
+    the pill crossed mid-accent. Barely readable on Plex yellow.
+  fill eased, label snapped — deselecting put a fully white label on a fully
+    yellow pill on the first frame. This one reached a user.
+  label eased, fill snapped — the same thing, reflected.
+
+There is no ordering that escapes it, so they change on the same frame: nothing
+about the selected state is transitioned. A selected state is a state, not an
+animation; on a tab click the motion belongs to the page slide.
 
 It is the duration that makes this a test rather than something a human catches.
 A 300ms wash is obvious when you know to look and deniable when you do not, it
@@ -18,8 +25,9 @@ only exists on the frames between two correct states, and every screenshot ever
 taken of these controls shows them resting and correct.
 
 CI has no browser, so what is pinned here is the source decision the appearance
-depends on: the label colour is declared, and it is not transitioned. A control
-that is accent-filled at rest never crosses and is deliberately not covered.
+depends on: the resting label colour is declared, and neither half of the pair
+is transitioned. A control that is accent-filled at rest never crosses between
+fills and is deliberately not covered.
 
 These are source assertions, not behavior tests. Behavior needs a browser.
 """
@@ -183,23 +191,42 @@ def test_a_crossing_pill_declares_its_resting_label_colour(by_selector, selector
     )
 
 
+# The pair. Neither may be transitioned, because either one arriving without
+# the other leaves the pill wearing the wrong label for the duration.
+PAIRED = ('color', 'background-color')
+
+
 @pytest.mark.parametrize('selector', CROSSING)
-def test_a_crossing_pill_does_not_transition_its_label_colour(by_selector, selector):
-    """The whole fix. `color` must be switched, never interpolated."""
+def test_a_crossing_pill_transitions_neither_its_fill_nor_its_label(by_selector, selector):
+    """The whole fix. They change on the same frame, so neither eases.
+
+    The first version of this test asserted only that `color` was not
+    transitioned, which is how the second bug shipped: the fill kept its 300ms
+    ease, so deselecting put a fully white label on a fully yellow pill and held
+    it while the yellow drained. The assertion passed. It was the requirement
+    that was wrong, not the code.
+
+    A transition declaration is allowed here — just not over either half of the
+    pair. `all` is banned outright: it covers both, and covers whatever is added
+    to the rule next.
+    """
     transition = rule(by_selector, selector).get('transition')
-    assert transition, f'`{selector}` declares no transition'
+    if transition is None:
+        return  # nothing eases, which is the state this test wants
 
     properties = {part.strip().split(' ')[0] for part in transition.split(',')}
 
     assert 'all' not in properties, (
-        f'`{selector}` transitions `all`, which sweeps in `color`. That is the '
-        f'defect: the label crosses between white and black through mid-grey '
-        f'while the fill is still accent-coloured. Name the properties.'
+        f'`{selector}` transitions `all`, which covers both the fill and the '
+        f'label. Name the properties, and leave both out.'
     )
-    assert 'color' not in properties, (
-        f'`{selector}` transitions `color`. Between the neutral and accent '
-        f'fills every midpoint of that interpolation is illegible.'
-    )
+    for half in PAIRED:
+        assert half not in properties, (
+            f'`{selector}` transitions `{half}`. The fill and the label are one '
+            f'pair: easing either one alone leaves the pill wearing the wrong '
+            f'label for the whole duration, which is exactly the defect that '
+            f'reached a user. They change on the same frame or not at all.'
+        )
 
 
 @pytest.mark.parametrize('selector', CROSSING)

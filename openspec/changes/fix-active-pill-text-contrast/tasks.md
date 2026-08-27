@@ -40,9 +40,12 @@
 
 ## 3. Verify by eye
 
+Group 5 supersedes tasks 1.2–1.4 and 2.4; these remain as authored so the
+record of what was tried is not rewritten. Verify against group 5.
+
 - [ ] 3.1 Serve the app locally and, with DevTools animation playback slowed to
       10–25%, watch a tab **selection** on the Plex palette. The label must be
-      black from the first frame.
+      black from the first frame, on an already-accent fill.
 - [ ] 3.2 Watch a tab **deselection** at the same speed. This is the reported
       direction: the label must be white from the first frame and must never
       sit light on a still-yellow pill.
@@ -52,8 +55,9 @@
 - [ ] 3.4 Repeat 3.1 and 3.2 for a sort pill and a genre pill.
 - [ ] 3.5 Check the Jellyfin and Emby palettes by switching `data-server` on
       `<html>` in DevTools; the crossing must be clean in each.
-- [ ] 3.6 Confirm the fill still eases — this change must not read as the
-      transition having been removed.
+- [ ] 3.6 Confirm the pill's fill and label step on the **same frame** in both
+      directions. Sample the computed `color` and `background-color` together,
+      not one of them.
 
 ## 4. Gates and docs
 
@@ -66,3 +70,32 @@
       labels crossing between fills may belong in its conventions list.
 - [x] 4.4 No `Dockerfile`, `config/` or entrypoint change, so `make docker-smoke`
       is not required. Confirm that is still true of the final diff.
+
+## 5. Correction: the fill and the label are one pair
+
+The first implementation eased the fill and switched only the label. It reached
+`:dev` and a user reported it: deselecting a tab put a fully white label on a
+fully yellow pill and held it while the yellow drained — worse than the defect
+it replaced. Contrast is a relation between two properties, so moving one alone
+only reflects the bad window. See the correction in `design.md`.
+
+- [x] 5.1 Remove the `transition` declaration from `.tab` entirely. With both
+      `color` and `background-color` barred, `box-shadow` alone would ease a
+      shadow in after the fill it belongs to had already snapped.
+- [x] 5.2 Remove the `transition` declaration from `.sort-button,
+      .genre-button` for the same reason.
+- [x] 5.3 Rewrite the comment above `.tab` to name all three orderings that were
+      shipped and why only "both together" has no bad frame — two of the three
+      look like fixes for the third, which is how the second one got written.
+- [x] 5.4 Widen the test: neither `color` nor `background-color` may be
+      transitioned, directly or by `all`. A transition over anything else stays
+      permitted, so the rule constrains the pair rather than banning motion.
+- [x] 5.5 Accept that the hover tint snaps. Hover and selection share one
+      `background-color` and CSS cannot distinguish `.tab:not(.active)` reached
+      by hovering from `.tab:not(.active)` reached by deselection.
+- [x] 5.6 Mutation-test all three orderings — both eased, fill eased, label
+      eased — plus a `box-shadow`-only transition that must still PASS. The
+      previous mutation pass only drove the ordering that had been reported.
+- [x] 5.7 Reconcile `proposal.md`, `design.md`, `specs/visual-design/spec.md`
+      and `CLAUDE.md` with the corrected rule. The spec is what got this wrong;
+      the test inherited its blind spot and passed the broken build.

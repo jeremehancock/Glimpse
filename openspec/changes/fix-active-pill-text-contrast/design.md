@@ -61,16 +61,47 @@ way a human verifies it.
 
 ## Decisions
 
-### Switch the label colour rather than shortening its transition
+### CORRECTION: the fill and the label are one pair, so neither eases
 
-The label's job is to be readable. A colour that is readable at both ends and
-unreadable in between is not a fade between two states — it is a third state
-nobody designed. Shortening `color`'s duration to something imperceptible
-(80ms, say) would hide the symptom while leaving a number that has to be right,
-and the value that is actually correct for that number is zero.
+**This decision was originally written as "switch the label, let the fill ease",
+and that was wrong.** It shipped, and a user reported the result: deselecting a
+tab put a fully white label on a fully yellow pill and held it for the 300ms the
+fill took to drain. That is worse than the defect it replaced, where both eased
+and the label was at least still dark while the pill was at its brightest.
+
+The error was in the model, not the code. "Which property is causing the bad
+frames?" has no answer, because contrast is a relation between two properties
+and not a fact about either. Once one is instant and the other is not, there is
+a window where they disagree — and moving the instant one to the other side just
+reflects the window:
+
+| Fill | Label | Result |
+| --- | --- | --- |
+| eased | eased | text crosses mid-grey while the pill crosses mid-accent |
+| eased | switched | **white label on a full-yellow pill** on deselection |
+| switched | eased | the same, reflected |
+| switched | switched | correct on every frame |
+
+Only the last row has no bad frame, so that is the rule: they change together,
+which in CSS means neither is transitioned.
+
+The mirror flaw is worth naming because it went unreported. With the fill eased
+and the label switched, *selecting* a tab puts a black label on the dark neutral
+fill for the same 300ms. It is just as illegible; it reads as dim rather than
+lurid, and the page slide pulls the eye away. **A defect that only presents in
+one direction is still present in both** — the reported symptom was the loud
+half of a symmetric bug, and fixing only what was reported is what produced the
+second version.
 
 Alternatives considered:
 
+- **Ease the fill in, switch it out** — put the transition on `.tab.active`, so
+  the after-change style supplies it. Correct on deselection, still black-on-
+  dark on selection, and CSS cannot distinguish "just lost `.active`" from
+  "hovering while inactive": both are `.tab:not(.active)`.
+- **Shorten `color`'s duration to something imperceptible** (80ms, say). Hides
+  the symptom while leaving a number that has to be right, and the value that is
+  actually correct for that number is zero.
 - **Ease `color` faster than `background-color`.** Still an interpolation,
   still passes through mid-grey, and now the ratio between two durations is
   load-bearing and undocumented.
@@ -82,19 +113,30 @@ Alternatives considered:
   than the problem needs, and it would fade the label out mid-change — visually
   the same complaint.
 
-### Name the transitioned properties
+### Remove the transition rather than narrow it
 
-`transition: background-color var(--transition-speed), box-shadow
-var(--transition-speed)` on each base rule. `box-shadow` is named because
-`.tab.active` adds `var(--shadow-sm)` and that easing is wanted.
+With both halves of the pair barred and `box-shadow` the only thing left, the
+honest rule declares no transition at all. Keeping `transition: box-shadow` to
+ease `--shadow-sm` alone would leave a shadow drifting in after the fill it
+belongs to had already snapped.
 
-The list is what makes the omission of `color` legible: a reader sees which
-properties animate and that the label is not among them. With `all` plus an
-override, the fact would live in two places and have to be assembled.
+Alternatives considered: keep `all` and add `transition-property` exclusions —
+CSS has no such thing. `all` plus `transition: color 0s, background-color 0s`
+states the same fact in a way that reads as an accident.
 
-Alternative considered: keep `all` and add `transition-property` exclusions —
-CSS has no such thing. `all` plus `transition: color 0s` would work and states
-the same fact in a way that reads as an accident.
+### Accept that the hover tint snaps too
+
+Hover and selection both change `background-color`, and CSS cannot tell "just
+lost `.active`" from "hovering while inactive" — both are `.tab:not(.active)`,
+so any transition serving the hover ease also serves the deselection wash. The
+hover tint therefore becomes instant.
+
+It could have been kept: painting the accent fill with `background-image:
+linear-gradient(accent, accent)` puts it outside the `background-color`
+transition, so hover eases and the selected state snaps. Rejected — a solid
+gradient used to dodge a transition reads as a mistake to the next person, and
+it buys the ease on a `rgba(255, 255, 255, 0.1)` tint nobody has asked for. An
+instant hover response is not a worse one.
 
 ### Declare the resting label colour on `.tab`
 
@@ -113,12 +155,22 @@ silently.
 the shape of the source, because the thing that would catch it in a browser does
 not exist in CI.
 
-The assertion: for each of the three base rules, the declared `transition` names
-its properties, does not use `all`, and does not include `color`; and each base
-rule declares a `color`. Parsed from the rule bodies by name, so a rule that is
-renamed or split fails loudly rather than silently passing on a regex that no
+The assertion: for each base rule, neither `color` nor `background-color` is
+transitioned — directly or by `all` — and each base rule declares a `color`. A
+transition over anything else stays permitted, so the test constrains the pair
+rather than banning motion. Parsed from the rule bodies by name, so a rule that
+is renamed or split fails loudly rather than silently passing on a regex that no
 longer matches anything — the "live code that cannot succeed" failure this repo
 has shipped before.
+
+**The first version of this test named only `color`, and it passed the build
+that reached the user.** That is the lesson worth keeping: the test encoded the
+requirement faithfully, and the requirement was wrong. A test derived from a
+spec inherits the spec's blind spot, so it can confirm an intention and never
+challenge it. Nothing here was going to catch this except a person looking at
+the screen — which is why group 3 of `tasks.md` is not optional, and why the
+mutation pass now drives each of the three failing orderings through the
+assertions rather than only the one that was reported.
 
 Alternative considered: a broader assertion over every rule in the stylesheet
 that sets `background-color: var(--primary-color)`. Rejected — it would sweep in
@@ -126,27 +178,36 @@ the always-accent controls, which have no crossing and no reason to be
 constrained, and the test would then be enforcing something the spec does not
 say.
 
-### Verification is by eye, and the eye needs slow motion
+### Verification is by eye, and it needs both directions
 
 A 300ms wash is exactly the duration that is obvious when you know to look and
 deniable when you do not. Verify with DevTools animation playback slowed to
-10–25%, or by temporarily raising `--transition-speed`, and check the crossing
-in **both** directions on at least the Plex palette — deselection is the
-direction where the label goes light while the pill is still yellow, which is
-the reported symptom. `transition: all` being gone is not proof that the label
-stopped moving; sample the computed `color` across the change.
+10–25%, and check **both** directions on at least the Plex palette.
+
+Both, specifically, because checking one is how the second version shipped:
+selection was verified, looked better, and the mirror flaw sat in the direction
+nobody watched. Deselection is the loud one — a light label over a draining
+yellow. Selection is the quiet one — a black label on the dark neutral fill,
+which is equally illegible and reads as nothing being wrong.
+
+`transition: all` being gone is not proof that anything stopped moving. Sample
+the computed `color` and `background-color` together across the frames of the
+change; what must be true is that they step on the same frame.
 
 ## Risks / Trade-offs
 
-- **The instant colour switch looks abrupt next to the easing fill.** →
-  Unlikely to read as abrupt at all: the eye tracks the pill's fill, and text
-  that is simply correct throughout is not something a viewer notices. If it
-  does read badly, the answer is to shorten the *fill*, not to re-animate the
-  label.
-- **Naming properties means a future declaration gets no transition and nobody
-  notices.** → That is the trade being made, and it is the right way round: a
-  missing transition is visible, an unwanted one on a layout property is not.
-  The spec states it so the next person does not "fix" it back to `all`.
+- **The pill's state change is now instant and may read as abrupt.** → It should
+  not: on a tab click the page slide supplies the motion, and the pill snapping
+  under it is not something a viewer can separate out. If it does read badly,
+  the answer is a transition on something that does not bear on contrast — a
+  shadow, a transform — never on the fill or the label.
+- **The hover tint no longer eases.** → Accepted, and stated in the decision
+  above. An instant hover response is not a worse one, and the alternative that
+  preserves it costs more legibility in the source than it buys on screen.
+- **A future declaration on these rules gets no transition and nobody notices.**
+  → That is the trade, and it is the right way round: a missing transition is
+  visible, an unwanted one on the fill is not. The spec states it so the next
+  person does not "fix" it back to `all`.
 - **The test pins rule names, so renaming a control breaks it.** → Intended. A
   rename is exactly when someone should be re-reading this decision, and a test
   that quietly matches nothing is worse than one that fails.

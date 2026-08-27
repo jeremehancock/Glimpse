@@ -368,21 +368,39 @@ those tags.
     are hover-and-fine-pointer only, so a reason attached to one is a reason no
     touch user ever receives. A control with nothing to offer is usually an
     *empty* destination rather than a dead one — prefer opening it and saying so.
-- **A control that crosses between the neutral fill and the accent fill switches
-  its label colour — it never eases it.** The two fills sit at opposite ends of
-  the brightness range, so their labels do too: white on `--tab-bg`, black on the
-  accent. Easing both together does not fade one legible state into another. It
-  drives the text through mid-grey at the same rate it drives the pill through
-  mid-accent, and mid-grey on Plex yellow is barely readable. Worst on
-  *de*selection, where the label goes light while the pill is still yellow.
-  - **`transition: all` is how `color` got in, on all three pills, unwritten.**
-    Name the properties. `all` also enrols whatever declaration is added to the
-    rule next, including a layout property — the expensive kind.
+- **A control crossing between the neutral fill and the accent fill changes BOTH
+  ON THE SAME FRAME. Neither is transitioned.** The two fills sit at opposite
+  ends of the brightness range, so their labels do too — white on `--tab-bg`,
+  black on the accent — which makes them one pair: whenever one arrives without
+  the other, the pill wears the wrong label for the whole duration. **A selected
+  state is a state, not an animation.** On a tab click the page slide supplies
+  the motion; a 300ms pill fade adds nothing a viewer can attribute.
+  - **All three orderings shipped, and two of them look like fixes for the
+    third.** `transition: all` eased both, so the text crossed mid-grey while
+    the pill crossed mid-accent — barely readable on Plex yellow. Easing the
+    fill and switching the label was *worse*: deselecting put a fully white
+    label on a fully yellow pill on the first frame and held it while the yellow
+    drained. That one reached a user. Switching the fill and easing the label is
+    the same defect reflected. Contrast is a relation between two properties,
+    not a fact about either, so moving one alone only moves the bad window.
+  - **A defect that presents in one direction is still present in both.** With
+    the fill eased and the label switched, *selecting* put a black label on the
+    dark neutral fill — equally illegible, reads as dim rather than wrong, and
+    went unreported. Fixing only the half that was reported is what produced the
+    second version. Verify selection AND deselection, every time.
+  - **`transition: all` is how `color` got into the fade in the first place,
+    unwritten.** Name the properties — or, once nothing is left that may move,
+    declare no transition at all rather than one naming what the rule does not
+    change. The pills' hover tint snaps as a consequence: hover and selection
+    share one `background-color`, and CSS cannot tell `.tab:not(.active)`
+    reached by hovering from the same state reached by deselection.
   - It is the 300ms that made it a test rather than something a human catches:
     it exists only on the frames between two correct states, so every
     screenshot ever taken of these controls shows them resting and fine.
-    `tests/test_pill_contrast.py` pins the source decision; verify the picture
-    with DevTools animation playback slowed to 10–25%, in **both** directions.
+    `tests/test_pill_contrast.py` pins the source decision — but **its first
+    version passed the build that reached the user**, because it encoded the
+    spec faithfully and the spec was wrong. A test derived from a spec inherits
+    the spec's blind spot. Verify with DevTools animation playback at 10–25%.
 - **The media grid renders a WINDOW near the viewport, never the library.** A
   library is data; a grid is a rendering of part of it. Rendering every item tied
   the browser's per-frame cost to how much media a user owns, so the app got
