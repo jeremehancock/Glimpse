@@ -24,7 +24,7 @@ A sleek, responsive web application for browsing and viewing your Plex, Jellyfin
 
 ## ❤️ Support this project
 
-[![Donate](https://raw.githubusercontent.com/jeremehancock/Glimpse/main/assets/donate-button.png)](https://www.buymeacoffee.com/jeremehancock)
+[![Buy Me A Coffee](https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png)](https://www.buymeacoffee.com/jeremehancock)
 
 ## 🔧 Prerequisites
 
