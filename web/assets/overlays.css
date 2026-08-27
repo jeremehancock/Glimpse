@@ -90,11 +90,35 @@
     touch-action: none;
 }
 
+/* ONE handle for every tray, and its colour is derived rather than picked.
+   #9aa0aa clears 3:1 — the bar for a control rather than for text — against
+   BOTH surfaces this handle can land on:
+
+       vs. the panel's own surface #2a2a2a          5.46:1
+       vs. white artwork at 0.10 over it (#3f3f3f)  3.98:1
+
+   Both, in one value, because a handle verified against one of them is the
+   defect this replaces. It was #4b4f57, which is 1.75:1 on plain surface: below
+   the bar on every tray in the app, for as long as there have been trays. That
+   went unseen because the detail overlay — the only place anyone had looked at
+   this handle, since it is the only one with a picture behind it — masked the
+   artwork away from behind the handle instead. So the handle was never legible
+   BECAUSE of that mask; it was legible in spite of being the wrong colour, in
+   one overlay, by having its background deleted.
+
+   Do not scope a lighter handle to the detail overlay. The handle is one
+   component (same rule as .genre-item, same rule as the shared
+   .sheet__head/.modal__head padding) and two trays are almost never on screen
+   together, so a divergence here would never be noticed — it would just drift.
+
+   3:1 and not 4.5:1 because it is not text. But on touch it is the only
+   affordance that dismisses a tray by gesture, so it is the last thing in the
+   app that should depend on which item happens to be open. */
 .sheet__handle {
     width: 40px;
     height: 5px;
     border-radius: var(--radius-pill);
-    background: #4b4f57;
+    background: #9aa0aa;
 }
 
 /* ONE head, worn by both shapes. Declared here rather than twice because the
@@ -199,6 +223,35 @@
     overflow-y: auto;
     overscroll-behavior: contain;
     padding: 0 20px 20px;
+}
+
+/* A body that has a PINNED REGION above it starts clear of the border between
+   them, rather than flush against it.
+
+   That border marks where the item's identity stops and its description begins.
+   A heading set immediately beneath it groups with the block above instead of
+   opening the one below, so the first line of the summary becomes the first
+   thing that reads as content — the detail overlay's "Overview" was doing
+   exactly that.
+
+   20px is the body's own horizontal inset, so the distance below the division
+   matches the distance at its sides. A number with a reason rather than one that
+   gets re-guessed.
+
+   Keyed on `.modal__fixed`, NOT on the detail overlay. The rule states the real
+   condition — a scrolling body with a pinned region above it — so it is right
+   the day a second overlay pins something, and it needs no class anyone has to
+   remember to add. Naming the overlay instead would be a registry by another
+   route, which is what overlays.js refuses at the top of the file.
+
+   `+` and not `~`: the body is the immediate next sibling, and `~` would also
+   match any later one. (Not the situation the `.sheet__grip ~ …head` rule is
+   in, where `.modal-backdrop-art` sits between the two.)
+
+   Overlays with no fixed region — trailer, roulette, genre, server switcher —
+   do not match, and keep the spacing their own title bar already gives them. */
+.modal__fixed + .modal__body {
+    padding-top: 20px;
 }
 
 /* A dialog may hold content ABOVE its scrolling body that does not scroll with

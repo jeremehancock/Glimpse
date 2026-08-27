@@ -18,6 +18,16 @@ from pathlib import Path
 
 import pytest
 
+from contrast import (
+    TEXT_BAR,
+    WHITE,
+    composite,
+    contrast_ratio,
+    declared_token,
+    declared_value,
+    parse_hex,
+)
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WEB = REPO_ROOT / 'web'
 INDEX = WEB / 'index.html'
@@ -362,9 +372,9 @@ def test_genuinely_static_files_keep_their_long_cache(nginx):
 def test_grip_is_lifted_above_the_artwork(index):
     """Paint order, not opacity.
 
-    `.modal-backdrop-art` is positioned and the grip is not, so the artwork
-    covers it whatever the mask says. The mask alone loses to paint order; the
-    lift alone leaves a grey handle on an arbitrary photograph.
+    `.modal-backdrop-art` is positioned and the grip is not, so without this the
+    handle is not dim, it is BEHIND the picture. Necessary but not sufficient:
+    the other half is the handle's own colour, asserted in test_overlay_markup.
     """
     block = re.search(r'\.modal__fixed \.sheet__grip\s*\{(.*?)\}', index, flags=re.S)
     assert block, '.modal__fixed .sheet__grip has no rule'
@@ -372,34 +382,95 @@ def test_grip_is_lifted_above_the_artwork(index):
     assert 'z-index: 1' in block.group(1)
 
 
-def test_artwork_clears_past_the_handle_not_up_to_it(index, tokens):
-    """The fade must END beyond the handle, not arrive at opaque on its edge.
+def test_the_muted_metadata_is_legible_over_the_brightest_artwork(index, tokens):
+    """The number the artwork's opacity is FOR.
 
-    `--grip-height` is the handle's LOWER edge. A gradient running
-    `transparent 0 -> opaque var(--grip-height)` therefore covers the handle
-    itself, which sits in the last 5px of that distance at 71-100% opacity.
-    Clearing a region means being clear across the whole of it and then some.
+    `.modal-year` and the `.metadata-item` pills are `--muted-text` drawn over
+    the item's backdrop image. At the 0.35 that shipped, a white backdrop
+    composites to #757575 and #aaa over it is 2.00:1 — under half the 4.5:1 a
+    body-text bar asks for. The title survived at 4.64:1 because it is white,
+    which is why this reported as the small print going soft rather than as the
+    overlay being broken, and only on some items.
+
+    Measured against the DIMMEST text over the artwork, not the title. And
+    against a fully white image, not a representative one: which backdrop is
+    behind the text is decided by the user's library, so a bar met only by the
+    average one fails for somebody with nothing on screen to say so.
+
+    Recomputed here from the CSS rather than asserted as a literal opacity, so
+    that a later edit to `--muted-text`, to `--surface`, or to the opacity is
+    checked against what it actually does rather than against a number somebody
+    would have to remember to update.
     """
-    assert '--grip-clear' in tokens, '--grip-clear is not declared'
-    derived = re.search(r'--grip-clear:\s*calc\(var\(--grip-height\)([^)]*)\)', tokens)
-    assert derived, (
-        '--grip-clear must be derived from --grip-height, not restated. Two '
-        'hand-copied values drift, and the symptom is an illegible handle on '
-        'bright artwork only.'
-    )
-    assert '+' in derived.group(1), '--grip-clear must be LARGER than --grip-height'
+    opacity = float(declared_value(index, '.modal-backdrop-art', 'opacity'))
+    surface = parse_hex(declared_token(tokens, '--surface'))
+    muted = parse_hex(declared_value(index, ':root', '--muted-text'))
 
-    body = block_after(index, '.modal-backdrop-art {')
-    # Both declarations, not just whichever comes first: the prefixed and
-    # unprefixed properties are two separate gradients that have to agree, and
-    # an edit to one of them is exactly how they stop agreeing.
-    declarations = re.findall(r'(?:-webkit-)?mask-image:\s*(.*?);', body, flags=re.S)
-    assert len(declarations) == 2, (
-        f'expected a prefixed and an unprefixed mask-image, found {len(declarations)}'
+    behind_the_text = composite(WHITE, surface, opacity)
+    ratio = contrast_ratio(muted, behind_the_text)
+
+    assert ratio >= TEXT_BAR, (
+        f'the year and metadata sit at {ratio:.2f}:1 over a white backdrop at '
+        f'opacity {opacity}. Below {TEXT_BAR}:1 the small print goes soft on '
+        f'bright artwork only, which reads as some items being wrong rather '
+        f'than as a setting being wrong. Lower the artwork opacity, or lift the '
+        f'metadata off --muted-text — but do not relax this bar.'
     )
-    for gradient in declarations:
-        assert 'transparent var(--grip-clear)' in gradient, (
-            'the mask must hold transparent all the way to --grip-clear before '
-            "it begins to fade, not arrive at opaque on the handle's edge"
-        )
-        assert 'var(--grip-height)' in gradient
+
+
+def test_the_artwork_is_one_strength_with_no_fade(index):
+    """No mask, in either spelling.
+
+    There was one: a gradient holding the artwork transparent across the grab
+    handle. It is gone because the handle now carries its own contrast, and
+    because a fade across the top edge reads as a smudge on an otherwise crisp
+    panel. Both spellings are checked — the prefixed and unprefixed properties
+    are two separate masks, and removing one alone leaves the fade in place on
+    exactly the WebKit phones the tray shape exists for.
+    """
+    body = block_after(index, '.modal-backdrop-art {')
+    assert not re.search(r'(?:-webkit-)?mask(?:-image)?\s*:', body), (
+        'the artwork is masked again. It is one strength for the whole region: '
+        'what a reader sees at the top edge is what they see beside the poster.'
+    )
+
+
+def test_the_artwork_is_still_visible(index, tokens):
+    """The other side of the bar above.
+
+    Dimming the artwork until the text passes is trivially satisfied by dimming
+    it to nothing, and a test that only pushes one way eventually gets that.
+    The artwork is texture behind the identity block and it is supposed to be
+    seen, so the composite has to stay clear of the bare panel surface.
+    """
+    opacity = float(declared_value(index, '.modal-backdrop-art', 'opacity'))
+    surface = parse_hex(declared_token(tokens, '--surface'))
+
+    assert opacity > 0, 'the artwork is invisible; it is texture, not nothing'
+    lightest = composite(WHITE, surface, opacity)
+    assert contrast_ratio(lightest, surface) >= 1.2, (
+        'the artwork no longer separates from the panel it is drawn on, so a '
+        'bright backdrop is indistinguishable from no backdrop at all'
+    )
+
+
+def test_the_fade_tokens_are_gone(tokens):
+    """`--grip-height` and `--grip-clear` existed only to size that mask.
+
+    Deleted with it rather than left declared: a token nothing reads looks like
+    a live decision to whoever finds it next, which is the shape of dead code
+    this project has shipped before. Re-adding the mask has to re-add them, and
+    that is the point.
+
+    Declarations and `var()` reads, not the bare names — the comment where they
+    used to be says what they were, deliberately, and an assertion that a
+    removal's own explanation cannot mention it is an assertion nobody can
+    satisfy honestly.
+    """
+    for name in ('--grip-height', '--grip-clear'):
+        for path in sorted(WEB.rglob('*.css')) + sorted(WEB.rglob('*.html')):
+            if path.name == 'alpine.min.js':
+                continue
+            source = strip_comments(path.read_text())
+            assert not re.search(rf'{name}\s*:', source), f'{name} is declared again in {path.name}'
+            assert f'var({name}' not in source, f'{name} is read again in {path.name}'
