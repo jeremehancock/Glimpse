@@ -30,9 +30,9 @@
 
 ## 5. Confirm the pipeline, on `dev`
 
-- [ ] 5.1 Push to `dev` and open the `CI` run. Both jobs green, **and** no step reports being forced onto a newer Node runtime — the absence of the warning is the deliverable, so read the log rather than the check mark.
-- [ ] 5.2 Open the `Publish Docker image` run that follows and confirm it is green and pushed `:dev`. This is the first and only exercise the publish workflow gets; it cannot be run locally.
-- [ ] 5.3 Note in the PR that the `action-gh-release@v3` step is still unexercised — its `if:` keeps it from running on a `dev` push. It first executes on the merge to `main` that carries a VERSION bump, and that run is the one to watch at `/ship`.
+- [x] 5.1 Push to `dev` and open the `CI` run. Both jobs green, **and** no step reports being forced onto a newer Node runtime — the absence of the warning is the deliverable, so read the log rather than the check mark. **Done:** run `33089217779`, both jobs green, zero matches for the warning. Grepped the previous run (`33087335808`) as a control, which returns it in *both* jobs — confirming the grep works and that `ci.yml` had been warning in its own log all along.
+- [x] 5.2 Open the `Publish Docker image` run that follows and confirm it is green and pushed `:dev`. **Done:** run `33089273842` green, `:dev` pushed at 15:42:58Z for amd64 and arm64. **But the premise of this task was wrong:** it is *not* an exercise of the bumped workflow. The run executed `actions/checkout@v4` and emitted the original six-action warning, because `workflow_run` reads the workflow file from the default branch. `main` still holds the old pins, so every version bump in `docker-publish.yml` is inert until the merge.
+- [x] 5.3 Note in the PR what is still unexercised, which is **more than anticipated**. Not just `action-gh-release@v3` behind its `if:` — the whole of `docker-publish.yml`, for the `workflow_run` reason in 5.2. The post-merge publish run is the first exercise of any of it, and is the one to watch.
 
 ## 6. Docs
 
