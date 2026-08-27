@@ -10,6 +10,12 @@ It SHALL NOT be faded, masked or inset anywhere within the region: the artwork's
 strength is one number for the whole of it, so that what a reader sees at the top
 of the panel is the same treatment they see at the bottom of it.
 
+The grab handle SHALL remain distinguishable from the artwork behind it. That
+outcome is unchanged; what changed is how it is reached. It was reached by
+clearing the artwork away behind the handle, and it is now reached by the
+handle's own colour — see `visual-design`, which states it once for every tray
+rather than arranging it here for the one overlay that has a picture behind it.
+
 #### Scenario: Artwork does not reach the scrolling content
 
 - **WHEN** the detail overlay is opened for an item that has backdrop artwork
@@ -23,28 +29,74 @@ of the panel is the same treatment they see at the bottom of it.
   edge as it is beside the poster
 - **AND** no part of it SHALL be faded out or clipped away
 
+#### Scenario: The grab handle stays legible
+
+- **WHEN** the detail overlay is opened as a tray for an item with backdrop
+  artwork
+- **THEN** the grab handle SHALL be distinguishable from the artwork behind it
+
 #### Scenario: No artwork is not a gap
 
 - **WHEN** the detail overlay is opened for an item with no backdrop artwork
 - **THEN** the fixed region SHALL render normally against the panel's own surface
 
+## REMOVED Requirements
+
 ### Requirement: The grab handle stays legible over any item's artwork
+
+**Reason**: This requirement made the handle legible by deleting its background —
+the artwork was held fully transparent across the whole area the handle occupies,
+over a distance derived from the handle's own metrics. That arrangement is
+withdrawn on two counts.
+
+It produced a visible fade across the top edge of every item's artwork, which
+reads as a smudge on an otherwise crisp panel and is what a user reported.
+
+More seriously, it made the handle's legibility a property of the detail
+overlay rather than of the handle. Clearing a background is arranged by whichever
+overlay owns that background, so it held here and was simply absent everywhere
+else — and the handle was in fact below the 3:1 contrast bar against plain panel
+surface on every tray in the app, for as long as there have been trays, while
+appearing to be carefully protected. Verifying the one overlay somebody had
+looked at is what hid that.
+
+Note also that the two requirements interact in the direction nobody would
+guess: lowering the artwork's opacity so the text over it is readable moves the
+composite *toward* a mid-grey handle, making the handle worse. Contrast is a
+relation between two colours, so it cannot be owned by only one of them.
+
+**Migration**: No action for users, and no configuration to change. The two
+guarantees this requirement carried are both still in force, relocated:
+
+- *The handle is drawn above the artwork* (paint order) is retained verbatim as
+  a new requirement below — it is still necessary, because the artwork is
+  positioned and the handle is not, so without it the handle is not dim but
+  hidden behind the picture.
+- *The handle is distinguishable from what is behind it* moves to
+  `visual-design`, restated as a contrast bar the handle's own colour must meet
+  against every surface it can land on — the panel surface and the brightest
+  artwork composited over it. That is strictly stronger: it now covers every
+  tray, where before it covered one.
+
+The tokens that existed only to size the cleared distance, `--grip-height` and
+`--grip-clear`, are deleted with it. A token no rule reads looks like a live
+decision to whoever finds it next.
+
+## ADDED Requirements
+
+### Requirement: The grab handle is drawn above the item's artwork
 
 The detail overlay's grab handle SHALL be drawn above the item's backdrop
 artwork.
 
-This is paint order, and it is necessary but no longer sufficient on its own. The
-artwork is positioned and the handle is not, so without the lift the artwork
-covers the handle whatever its opacity. The other half — the handle being
-distinguishable from what is behind it once it is on top — is now carried by the
-handle's own colour, stated once in `visual-design` for every tray rather than
-arranged here by clearing the artwork away behind this one.
+This is paint order and nothing else. The artwork is positioned and the handle is
+not, so without it the handle is not merely dim — it is behind the picture,
+whatever the artwork's opacity.
 
-The artwork SHALL NOT be cleared, faded or masked behind the handle. That
-arrangement was replaced, not relaxed: it made the handle's legibility a property
-of the detail overlay's artwork rather than of the handle, so every other tray's
-handle was left unverified — and it was, in fact, failing the same bar against
-plain surface the whole time.
+It is necessary but not sufficient on its own. The handle being *distinguishable*
+once it is on top is a separate guarantee, carried by the handle's own colour and
+stated in `visual-design`. The artwork SHALL NOT be cleared, faded or masked
+behind the handle to achieve it.
 
 #### Scenario: The handle is not covered by artwork
 
@@ -63,8 +115,6 @@ plain surface the whole time.
 - **WHEN** the detail overlay is opened for an item that has backdrop artwork
 - **THEN** the artwork SHALL fill the fixed region to the panel's top edge, with
   no band of bare surface above it and no fade across it
-
-## ADDED Requirements
 
 ### Requirement: The item's artwork is faint enough to read the identity block over
 
