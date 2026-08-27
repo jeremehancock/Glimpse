@@ -18,17 +18,23 @@ jobs:
     name: Lint · Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.13'
 
+      # `cache: npm` stays explicit. setup-node v5 added automatic caching driven
+      # by a `packageManager` field and v6 narrowed it to npm; naming the cache
+      # here is what keeps this action's behaviour the same across those majors.
+      # `node-version` is the toolchain's Node — the one ESLint and Prettier run
+      # on. It is NOT the runtime GitHub picks for an action: that comes from the
+      # action's own action.yml, so bumping this silences no deprecation warning.
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '24'
           cache: npm
 
       - name: Install toolchain
@@ -49,7 +55,7 @@ jobs:
     name: Build image · Smoke test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build image
         run: docker build -t glimpse:ci .
