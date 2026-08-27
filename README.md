@@ -206,7 +206,7 @@ Exclusion lists are comma-separated and can include library names or IDs:
 - **Multi-Server**: Configure credentials for any combination of servers. With two, the app shows a toggle; with three, a switcher tray. Each server also has its own URL (`/plex/`, `/jellyfin/`, `/emby/`).
 - **Primary Server**: When multiple servers are configured, `PRIMARY_SERVER` determines which one is shown by default and affects the app's theme.
 - **Automatic Detection**: If `PRIMARY_SERVER` is set incorrectly or credentials are missing, the app will automatically detect and switch to an available server.
-- **Clean Data Updates**: When libraries are excluded, the fetchers automatically clean existing data files to ensure excluded content doesn't persist.
+- **Clean Data Updates**: Each import rebuilds a server's snapshot from scratch, so excluded content does not linger. The new snapshot replaces the old one only once it is complete — the site keeps serving your existing library throughout, and an import that fails leaves it untouched.
 
 ### Finding Your Plex Token
 
@@ -264,6 +264,7 @@ Glimpse/
 │
 ├── scripts/
 │   ├── glimpse_config.py     # Resolves the environment into config.json at startup
+│   ├── snapshot_io.py        # Publishes a snapshot whole, so the site stays up during an import
 │   ├── plex_data_fetcher.py  # Python script to fetch Plex data
 │   └── jellyfin_data_fetcher.py # Python script to fetch Jellyfin/Emby data
 │
@@ -304,18 +305,21 @@ Glimpse/
     ├── plex/                 # Plex server data
     │   ├── movies.json       # Plex movie metadata
     │   ├── tvshows.json      # Plex TV show metadata
-    │   ├── checksums.pkl     # MD5 checksums for Plex artwork
+    │   ├── fingerprint       # Settings hash of the last successful Plex import
+│   ├── checksums.pkl     # MD5 checksums for Plex artwork
     │   ├── posters/          # Plex movie and TV show posters
     │   └── backdrops/        # Plex movie and TV show backgrounds
     ├── jellyfin/             # Jellyfin server data
     │   ├── movies.json       # Jellyfin movie metadata
     │   ├── tvshows.json      # Jellyfin TV show metadata
-    │   ├── checksums.pkl     # MD5 checksums for Jellyfin artwork
+    │   ├── fingerprint       # Settings hash of the last successful Jellyfin import
+│   ├── checksums.pkl     # MD5 checksums for Jellyfin artwork
     │   ├── posters/          # Jellyfin movie and TV show posters
     │   └── backdrops/        # Jellyfin movie and TV show backgrounds
     └── emby/                 # Emby server data
         ├── movies.json       # Emby movie metadata
         ├── tvshows.json      # Emby TV show metadata
+        ├── fingerprint       # Settings hash of the last successful Emby import
         ├── checksums.pkl     # MD5 checksums for Emby artwork
         ├── posters/          # Emby movie and TV show posters
         └── backdrops/        # Emby movie and TV show backgrounds
@@ -324,15 +328,16 @@ Glimpse/
 ## 🔄 How It Works
 
 1. **Data Fetching**: Python scripts connect to your media server(s) using the provided tokens and fetch metadata for all movies and TV shows.
-2. **Library Filtering**: Excluded libraries are automatically skipped during data fetching, and existing data files are cleaned to ensure consistency.
+2. **Library Filtering**: Excluded libraries are automatically skipped during data fetching. Changing an exclusion list and restarting re-imports that server so the change takes effect immediately.
 3. **Multi-Server Support**: When multiple servers are configured, data is fetched separately and stored in server-specific directories.
 4. **Image Processing**: Media posters and backdrops are downloaded, with MD5 checksums to avoid re-downloading unchanged files.
 5. **Configuration**: At startup the container resolves your environment into `config.json`, which the interface reads once when it loads. Your web files are never modified.
 6. **Theming**: The interface automatically adapts its theme based on your primary server (Plex orange/yellow, Jellyfin blue, or Emby green).
 7. **Server Switching**: If multiple servers are configured, users can switch between them — a toggle for two servers, a menu for three. Each server also has its own URL: `http://your-server:9090/plex/`, `/jellyfin/`, or `/emby/`, which you can bookmark.
 8. **Web Server**: Nginx serves the static web interface and the downloaded data.
-9. **Scheduled Updates**: Cron runs the data fetchers on the configured schedule to keep content up-to-date.
+9. **Scheduled Updates**: Cron runs the data fetchers on the configured schedule to keep content up-to-date. The site stays fully usable while an update runs — the previous snapshot keeps being served until the new one is complete, and an update that fails leaves your existing library untouched.
 10. **Persistence**: All data is stored in volumes mapped to your host, ensuring it persists between container restarts.
+11. **Fast Restarts**: Restarting or rebuilding the container does **not** re-import your library. Each server records a fingerprint of the settings that produced its last successful import; if its URL, token and exclusion list are unchanged, that import is skipped and the site comes straight up. Change any of those three and only that server re-imports. To force one by hand, delete `data/<server>/fingerprint` and restart.
 
 ## 🌐 Customization
 
@@ -406,7 +411,9 @@ docker-compose logs glimpse-media-viewer
 
 ### Manual Data Update
 
-To trigger a data update manually (using your configured exclusions):
+To trigger a data update manually (using your configured exclusions). Your
+library stays browsable while these run — the new snapshot only replaces the old
+one once it has finished:
 
 **Plex:**
 
@@ -540,7 +547,7 @@ If excluded libraries are still appearing:
 
 1. **Check library names**: Ensure the library names match exactly (case-sensitive)
 2. **Verify environment variables**: Check that the exclusion variables are set correctly
-3. **Restart container**: Library exclusions are applied during data fetching, so restart after configuration changes
+3. **Restart container**: Exclusion lists are part of each server's settings fingerprint, so changing one and restarting re-imports that server and applies it. If it did not take effect, delete `data/<server>/fingerprint` and restart to force the import
 4. **Check logs**: Look for exclusion messages in the container logs:
    ```bash
    docker-compose logs | grep -i "excluded\|skipping"

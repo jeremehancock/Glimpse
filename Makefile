@@ -73,4 +73,39 @@ docker-smoke:
 	@echo "--- the entrypoint did not touch an authored file ---"
 	@docker exec glimpse-smoke test ! -e /app/web/test.html \
 		&& echo "OK: web root is clean"
+	@echo "--- a published snapshot is readable OVER HTTP, not merely present ---"
+	@docker exec glimpse-smoke python3 -c "import sys; sys.path.insert(0,'/app/scripts'); \
+	import snapshot_io; from pathlib import Path; \
+	snapshot_io.publish_json([(Path('/app/data/plex/movies.json'), [{'id':'smoke'}])])"
+	@curl -fsS http://127.0.0.1:18080/data/plex/movies.json | python3 -c '\
+	import json,sys; d=json.load(sys.stdin); \
+	assert d==[{"id":"smoke"}], d; \
+	print("OK: nginx serves a freshly published snapshot")'
+	@echo "--- a FAILED fetch records no fingerprint, so the next boot retries ---"
+	@# These servers are unreachable by design, so the boot fetch failed. That
+	@# must not be recorded as an import, or the retry never happens.
+	@docker exec glimpse-smoke test ! -e /app/data/plex/fingerprint \
+		&& echo "OK: no fingerprint recorded for a failed fetch"
+	@docker restart glimpse-smoke >/dev/null
+	@for i in $$(seq 1 45); do \
+		if curl -fsS http://127.0.0.1:18080/ >/dev/null 2>&1; then break; fi; sleep 2; done
+	@docker logs glimpse-smoke 2>&1 | grep -q "no previous import recorded" \
+		&& echo "OK: the failed fetch is retried on the next boot" \
+		|| { echo "FAIL: a failed fetch was not retried"; \
+		     docker logs glimpse-smoke 2>&1 | tail -30; exit 1; }
+	@echo "--- a restart AFTER a successful import skips the fetch ---"
+	@# Stand in for an import that worked: record the fingerprint the boot just
+	@# derived from the environment.
+	@docker exec glimpse-smoke cp /run/glimpse/fingerprints/plex /app/data/plex/fingerprint
+	@docker restart glimpse-smoke >/dev/null
+	@for i in $$(seq 1 45); do \
+		if curl -fsS http://127.0.0.1:18080/ >/dev/null 2>&1; then break; fi; sleep 2; done
+	@docker logs glimpse-smoke 2>&1 | tail -40 | grep -q "Skipping plex fetch" \
+		&& echo "OK: plex fetch skipped on an unchanged restart" \
+		|| { echo "FAIL: plex re-fetched despite unchanged settings"; \
+		     docker logs glimpse-smoke 2>&1 | tail -30; exit 1; }
+	@echo "--- and the snapshot survived every one of those restarts ---"
+	@curl -fsS http://127.0.0.1:18080/data/plex/movies.json | python3 -c '\
+	import json,sys; assert json.load(sys.stdin)==[{"id":"smoke"}]; \
+	print("OK: snapshot intact across three boots")'
 	docker rm -f glimpse-smoke
