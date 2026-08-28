@@ -1,17 +1,36 @@
-## MODIFIED Requirements
+## REMOVED Requirements
 
 ### Requirement: A tray on touch, a dialog on a pointer device
 
-The media detail overlay, the menu, the server switcher, the genre filter and the
-trailer SHALL be presented as a tray on narrow, touch-first viewports and as a
-centred dialog on wide viewports. The roulette overlay SHALL be presented this
-way too, being a status overlay rather than a screenful of content.
+**Reason**: Replaced by "Every overlay is a tray on touch and a dialog on a
+pointer device" below, which is a stronger statement rather than an edit to this
+one. This requirement worked by naming the overlays that take the shape and
+carving out the ones that do not; its "The trailer is a dialog at every width"
+scenario is exactly what this change reverses, and it was the last exception. A
+rule with no exceptions left should not go on being written as a list — a list is
+the thing that goes stale, and this one already had, naming the roulette as
+centred after the roulette had opted in.
 
-There is no longer an overlay that is a dialog at every width. The trailer was
-the exception, on the reasoning that a trailer is sized to its video and a tray's
-job is to fill the width of a screen — but at touch widths a tray IS the width of
-the screen, and a full-width 16:9 video fills it exactly. The reasoning described
-a desktop and was applied at every width.
+**Migration**: None. No consumer reads these requirements at runtime, and every
+guarantee this made is carried forward by its replacement.
+
+## ADDED Requirements
+
+### Requirement: Every overlay is a tray on touch and a dialog on a pointer device
+
+Every overlay in the app SHALL be presented as a tray on narrow, touch-first
+viewports and as a centred dialog on wide viewports. There SHALL be no overlay
+that is a dialog at every width.
+
+This is stated as a rule over all overlays rather than as a list of the ones that
+take the shape. The list was the defect: it named the overlays it covered and the
+exceptions it did not, so it had to be edited whenever either set changed, and
+nothing failed when it was not.
+
+The trailer was the last exception, held back on the reasoning that a trailer is
+sized to its video while a tray's job is to fill the width of a screen — but at
+touch widths a tray IS the width of the screen, and a full-width 16:9 video fills
+it exactly. The reasoning described a desktop and was applied at every width.
 
 An overlay whose content has a fixed aspect ratio SHALL be bounded by the height
 available to it as well as by the width, so that a short viewport reduces the
@@ -48,8 +67,6 @@ content to fit rather than pushing it past the panel.
 - **WHEN** an overlay is presented as a centred dialog on a pointer device
 - **THEN** the grab handle SHALL NOT be shown, and the overlay SHALL offer a
   close control instead
-
-## ADDED Requirements
 
 ### Requirement: An overlay holding media draws its panel from the shared tokens
 

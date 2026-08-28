@@ -35,7 +35,14 @@ user who has filtered to Comedy is asking for a random comedy.
 ### Requirement: Roulette runs in a dialog that reports having nothing to pick
 
 While selecting, the application SHALL show an overlay indicating that a choice
-is being made, presented as a centred dialog at every width.
+is being made, presented as a tray on touch and a centred dialog on a pointer
+device like every other overlay.
+
+This sentence said "a centred dialog at every width" after the roulette had
+already opted into the tray shape, and nothing failed for as long as it was
+wrong. It is corrected here because `visual-design` now states that no overlay is
+a dialog at every width, and two specs contradicting each other is worse than
+either being stale alone.
 
 When no item can be selected because nothing matches the current filters, the
 overlay SHALL say so and offer a way to dismiss it. It MUST NOT close silently,

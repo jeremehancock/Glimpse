@@ -140,29 +140,29 @@
 three server themes (`data-server` = `plex`, `jellyfin`, `emby`) where colour is
 involved.
 
-- [ ] 8.1 Desktop, ~1920×1080: the panel's head, border and radius are
+- [x] 8.1 Desktop, ~1920×1080: the panel's head, border and radius are
       indistinguishable from the roulette overlay's opened beside it. The × is
       shown, the grab handle is not.
-- [ ] 8.2 Desktop: the well is one colour through the whole load — watch the
+- [x] 8.2 Desktop: the well is one colour through the whole load — watch the
       moment the iframe fades in and confirm nothing shifts behind it.
-- [ ] 8.3 Desktop: the head shows the film's title and year, and a very long
+- [x] 8.3 Desktop: the head shows the film's title and year, and a very long
       title ellipses without pushing the × out of the panel or growing the head.
-- [ ] 8.4 Desktop, short viewport ~1440×700: the height cap binds — the well
+- [x] 8.4 Desktop, short viewport ~1440×700: the height cap binds — the well
       stays 16:9 and the panel does not scroll.
-- [ ] 8.5 Phone, portrait: the overlay docks to the bottom edge and slides up,
+- [x] 8.5 Phone, portrait: the overlay docks to the bottom edge and slides up,
       the grab handle is shown, the × is not.
-- [ ] 8.6 Phone: drag the handle down — the trailer dismisses **and the audio
+- [x] 8.6 Phone: drag the handle down — the trailer dismisses **and the audio
       stops**. Use a real touch target or device emulation with touch input; a
       narrow desktop window shows the tray shape but dispatches no touch events,
       so the handle will look right and drag nothing.
-- [ ] 8.7 Phone, landscape ~667×375: the video fits inside the tray without
+- [x] 8.7 Phone, landscape ~667×375: the video fits inside the tray without
       overflowing it. This is the case the height cap exists for.
-- [ ] 8.8 Open the trailer from the detail overlay, dismiss it, and confirm the
+- [x] 8.8 Open the trailer from the detail overlay, dismiss it, and confirm the
       detail overlay is still open beneath and keyboard focus returns to the
       Watch Trailer button.
-- [ ] 8.9 Open a trailer, dismiss it, then open a different film's — the head
+- [x] 8.9 Open a trailer, dismiss it, then open a different film's — the head
       shows the new title, never the previous one.
-- [ ] 8.10 Confirm the four constant-titled overlays (roulette, genre, server
+- [x] 8.10 Confirm the four constant-titled overlays (roulette, genre, server
       switcher, menu) still show their full titles after the shared truncation
       rule in 3.5.
 

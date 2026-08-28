@@ -1,9 +1,18 @@
-## RENAMED Requirements
+## REMOVED Requirements
 
-- FROM: `### Requirement: A trailer plays in a dialog sized to the video`
-- TO: `### Requirement: A trailer plays in an overlay sized to the video`
+### Requirement: A trailer plays in a dialog sized to the video
 
-## MODIFIED Requirements
+**Reason**: Its "Centred at every width" scenario is the behaviour this change
+reverses, so the requirement cannot be carried forward as a modification — a
+modification may not drop a scenario, and keeping that one would assert the
+opposite of what ships. It is replaced below by "A trailer plays in an overlay
+sized to the video", which keeps every other guarantee it made.
+
+**Migration**: None for a user or an operator. The trailer opens the same way,
+from the same control, and stops playing on dismissal exactly as before; only its
+shape on a touch viewport changes.
+
+## ADDED Requirements
 
 ### Requirement: A trailer plays in an overlay sized to the video
 
@@ -49,8 +58,6 @@ so that a short viewport does not push the video past the panel that holds it.
   video
 - **THEN** the video SHALL be reduced to fit within the panel rather than
   extending past it
-
-## ADDED Requirements
 
 ### Requirement: The trailer overlay names the item it is playing
 
