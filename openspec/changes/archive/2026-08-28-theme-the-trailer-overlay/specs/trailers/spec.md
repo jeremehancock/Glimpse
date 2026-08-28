@@ -1,47 +1,18 @@
-# trailers Specification
+## REMOVED Requirements
 
-## Purpose
-TBD - created by archiving change convert-overlays-to-trays. Update Purpose after archive.
-## Requirements
-### Requirement: Closing a trailer stops playback
+### Requirement: A trailer plays in a dialog sized to the video
 
-Dismissing the trailer overlay SHALL stop the trailer playing. Audio continuing
-after the overlay has gone is the failure this prevents.
+**Reason**: Its "Centred at every width" scenario is the behaviour this change
+reverses, so the requirement cannot be carried forward as a modification — a
+modification may not drop a scenario, and keeping that one would assert the
+opposite of what ships. It is replaced below by "A trailer plays in an overlay
+sized to the video", which keeps every other guarantee it made.
 
-#### Scenario: Dismissing stops the video
+**Migration**: None for a user or an operator. The trailer opens the same way,
+from the same control, and stops playing on dismissal exactly as before; only its
+shape on a touch viewport changes.
 
-- **WHEN** a trailer is playing and the user dismisses the overlay
-- **THEN** playback SHALL stop and no audio SHALL continue
-
-#### Scenario: Dismissed by Escape
-
-- **WHEN** a trailer overlay is open and the user presses Escape
-- **THEN** it SHALL close and playback SHALL stop
-
-#### Scenario: Dismissed by the backdrop
-
-- **WHEN** the user activates the area outside a trailer overlay's panel
-- **THEN** it SHALL close and playback SHALL stop
-
-### Requirement: A trailer opened from the detail overlay returns to it
-
-The trailer overlay SHALL be openable from the detail overlay, and dismissing it
-SHALL leave the detail overlay open beneath.
-
-The control that opens it SHALL move focus before its own overlay changes state,
-so that dismissing the trailer returns a keyboard user to the detail overlay
-rather than to the top of the page.
-
-#### Scenario: The detail overlay survives the trailer
-
-- **WHEN** a trailer is opened from the detail overlay and then dismissed
-- **THEN** the detail overlay SHALL still be open
-
-#### Scenario: Focus returns to the detail overlay
-
-- **WHEN** a keyboard user opens a trailer from the detail overlay and dismisses
-  it
-- **THEN** focus SHALL return to a control within the detail overlay
+## ADDED Requirements
 
 ### Requirement: A trailer plays in an overlay sized to the video
 
@@ -164,4 +135,3 @@ including the per-server accent, rather than hardcoding them.
 - **WHEN** the trailer overlay is opened while a server whose accent differs from
   another's is selected
 - **THEN** the spinner SHALL be drawn in that server's accent colour
-

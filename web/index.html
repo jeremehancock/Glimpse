@@ -4796,14 +4796,23 @@
     </script>
 
     <!-- ============ Trailer ============
-         A dialog at EVERY width, deliberately not a tray. A trailer is sized to
-         its video's aspect ratio rather than to the screen, and a tray's job is
-         to fill a screen's width — docking a 16:9 frame to the bottom edge
-         would letterbox it against a panel it does not fill.
+         A tray on touch and a centred dialog on a pointer device, like every
+         other overlay.
+
+         It was a dialog at EVERY width, on the argument that a trailer is sized
+         to its video's aspect ratio while a tray's job is to fill a screen's
+         width — so docking a 16:9 frame to the bottom edge would letterbox it
+         against a panel it does not fill. That describes a desktop. At touch
+         widths a tray IS the width of the screen and a full-width 16:9 video
+         fills it exactly, so there was nothing to letterbox against; what a
+         phone did have was the app's only centred overlay, whose one dismissal
+         was a × in the corner furthest from a thumb.
 
          `closeTrailer()` clears the iframe: dismissing the overlay without
-         removing it leaves the audio playing behind a closed dialog. -->
-    <div class="modal" x-show="trailerOpen" x-cloak style="display:none"
+         removing it leaves the audio playing behind a closed dialog. That is
+         also what makes the drag safe — a dragged tray dismisses by clicking its
+         own backdrop, and this backdrop calls closeTrailer(). -->
+    <div class="modal modal--tray-on-touch" x-show="trailerOpen" x-cloak style="display:none"
         x-transition:enter="overlay-opening" x-transition:enter-start="overlay-shut"
         x-transition:enter-end="overlay-shown" x-transition:leave="overlay-closing"
         x-transition:leave-start="overlay-shown" x-transition:leave-end="overlay-shut"
@@ -4811,17 +4820,42 @@
         <div class="modal__backdrop" @click="closeTrailer()"></div>
         <div class="modal__panel modal__panel--video" role="dialog" aria-modal="true"
             aria-label="Trailer" tabindex="-1">
+            <!-- The three regions, and they are what `modal--tray-on-touch`
+                 needs to mean anything: the modifier hides the × on touch, so a
+                 panel carrying it with no grab handle to replace it is an
+                 overlay whose only remaining dismissals — the backdrop and
+                 Escape — are both invisible. The modifier and these arrived
+                 together. -->
+            <div class="sheet__grip"><span class="sheet__handle"></span></div>
             <div class="modal__head">
-                <h2>Trailer</h2>
+                <!-- Authored as "Trailer" so the overlay is labelled before its
+                     first open and if the script never runs. openTrailer()
+                     replaces it with the item's title and rewrites the panel's
+                     aria-label to match. -->
+                <h2 id="trailer-title">Trailer</h2>
                 <button class="overlay__close" @click="closeTrailer()"
                     aria-label="Close trailer">×</button>
             </div>
-            <div class="trailer-container">
-                <div class="trailer-loading">
-                    <div class="trailer-spinner"></div>
-                    <div class="trailer-loading-text">Loading trailer...</div>
+            <!-- The head is a SIBLING of the body and never inside it. Both the
+                 grip and the head carry `touch-action: none` for the drag, which
+                 the browser honours only while neither is itself the scroller. -->
+            <div class="modal__body">
+                <div class="trailer-container">
+                    <div class="trailer-loading">
+                        <div class="trailer-spinner"></div>
+                        <div class="trailer-loading-text">Loading trailer...</div>
+                        <!-- A SIBLING that is toggled, not a replacement for the
+                             whole indicator. The error used to be written over
+                             .trailer-loading's innerHTML, which destroyed the
+                             spinner — so closeTrailer() had to rebuild it from a
+                             string that was a second copy of the two lines
+                             above, with nothing to catch the two drifting. -->
+                        <div class="trailer-error-text" hidden>
+                            Failed to load trailer. Please try again later.
+                        </div>
+                    </div>
+                    <!-- Iframe inserted by openTrailer() -->
                 </div>
-                <!-- Iframe inserted by openTrailer() -->
             </div>
         </div>
     </div>
@@ -4864,65 +4898,120 @@
             fill: currentColor;
         }
 
+        /* The WELL the video sits in — and the only black in this overlay.
+
+           A 16:9 embed letterboxes against its own container whenever the source
+           is not exactly 16:9, and letterboxing against --surface reads as a
+           rendering fault rather than as a frame. So the black is a property of
+           the medium, not a theme choice, and it stops at this element: the
+           panel around it is the app's surface like every other overlay's. See
+           `.modal__panel--video` in overlays.css, which used to paint the whole
+           panel black and is what made the head a different colour from the body
+           in the first place.
+
+           The WIDTH is capped by the height available, and it has to be the
+           width. `max-height` on an aspect-ratio box clamps the height while the
+           width goes on filling its container — which breaks the ratio and
+           letterboxes the video inside its own well, silently, and only on the
+           short viewports nobody checks. Deriving the width from the height
+           budget keeps the box 16:9 at every size.
+
+           88vh is `.modal__panel`'s own max-height. 120px is the panel chrome
+           above and below this well, rounded up from the worst case: grip 17 +
+           head 74 + body padding 20 = 111px on touch, 98px on a pointer where
+           the grip is hidden but the head takes the 18px compensation. So the
+           cap binds only on a short viewport — a landscape phone, or a 700px
+           desktop window — which is exactly what it is for. On a normal desktop
+           the 960px panel is the narrower constraint and this never applies. */
         .trailer-container {
             position: relative;
-            padding-bottom: 56.25%;
-            /* 16:9 aspect ratio */
-            height: 0;
+            width: min(100%, calc((88vh - 120px) * 16 / 9));
+            aspect-ratio: 16 / 9;
+            margin-inline: auto;
             overflow: hidden;
-            background-color: rgba(0, 0, 0, 0.3);
-            border-radius: 8px;
+            background: #000;
+            border-radius: var(--radius-md);
         }
 
         .trailer-container iframe {
             position: absolute;
-            top: 0;
-            left: 0;
+            inset: 0;
             width: 100%;
             height: 100%;
-            border-radius: 8px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-            z-index: 10;
-            /* Ensure iframe appears above loading indicator */
+            border: 0;
             background-color: #000;
+            /* Above the loading indicator, which is 5. */
+            z-index: 10;
+            /* Matched to the well's radius, and deliberately not left to the
+               well's `overflow: hidden` alone: Safari does not reliably clip an
+               iframe to a rounded ancestor. The two values must stay equal.
+
+               A `box-shadow: 0 10px 30px` stood here too. It was inside that
+               clipping container, so it was cut away on every side and had never
+               once rendered — a declaration that looks like a live decision to
+               everyone who reads it. */
+            border-radius: var(--radius-md);
         }
 
-        /* Loading Indicator */
+        /* Drawn on the well's own black, OPAQUE rather than as a translucent
+           wash over it. The two backgrounds are a pair and must stay equal.
+
+           This was `rgba(26, 26, 26, 0.7)`, which composites over black to
+           #121212 — so the loading area and the video were two different blacks
+           with a visible seam between them, and the region changed colour at the
+           instant the iframe faded in, which is the instant a viewer is looking
+           hardest at it. */
         .trailer-loading {
             position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
+            inset: 0;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            background-color: rgba(26, 26, 26, 0.7);
+            gap: 15px;
+            padding: 0 20px;
+            text-align: center;
+            background: #000;
+            /* Below the iframe, which is 10. */
             z-index: 5;
-            /* Lower z-index than iframe */
-            border-radius: 8px;
+            border-radius: var(--radius-md);
             transition: opacity 0.5s ease, visibility 0.5s ease;
         }
 
+        /* The track is a token. It was `rgba(229, 160, 13, 0.2)` — Plex yellow
+           at 20% — so on Jellyfin and Emby the ring was drawn in another
+           server's theme with nothing on screen or in the source to say so. The
+           leading edge stays --primary-color: that is the part that SHOULD
+           follow the accent, and already did.
+
+           `spinner-rotate` is the app's existing keyframe. This rule carried a
+           byte-identical second copy of it named `trailer-spin`.
+
+           Not merged into `.loading-spinner` itself: that one's track is
+           `rgba(0, 0, 0, 0.1)`, chosen for the poster placeholder's light
+           --tab-bg, and it would be invisible on this black. Two spinners
+           sitting on opposite surfaces are not one component. Only the
+           duplicated keyframe was. */
         .trailer-spinner {
             width: 50px;
             height: 50px;
-            border: 4px solid rgba(229, 160, 13, 0.2);
+            border: 4px solid var(--border);
             border-top-color: var(--primary-color);
             border-radius: 50%;
-            animation: trailer-spin 1s linear infinite;
-            margin-bottom: 15px;
-        }
-
-        @keyframes trailer-spin {
-            to {
-                transform: rotate(360deg);
-            }
+            animation: spinner-rotate 1s linear infinite;
         }
 
         .trailer-loading-text {
             color: var(--light-text);
+            font-weight: 500;
+        }
+
+        /* Neither this nor the two elements above declares a `display`, which is
+           what lets the `hidden` attribute toggle between them: an author
+           `display` would outrank the UA stylesheet's `[hidden]` and the state
+           would silently stop switching. */
+        .trailer-error-text {
+            color: #ff4444;
             font-weight: 500;
         }
 
@@ -4962,13 +5051,57 @@
             // this code writes into are needed here.
             const trailerContainer = document.querySelector('.trailer-container');
             const trailerLoading = document.querySelector('.trailer-loading');
+            const trailerPanel = document.querySelector('.modal__panel--video');
+            const trailerTitle = document.getElementById('trailer-title');
+            const trailerSpinner = trailerLoading.querySelector('.trailer-spinner');
+            const trailerStatus = trailerLoading.querySelector('.trailer-loading-text');
+            const trailerError = trailerLoading.querySelector('.trailer-error-text');
+
+            /**
+             * Name the overlay after the item it is about to play.
+             *
+             * The visible head shows the item alone; the panel's accessible name
+             * carries "Trailer:" as well, so a screen reader hears both what kind
+             * of overlay opened and which film. Prefixing the visible head
+             * instead would spend the front of a truncated line on a word the
+             * head already implies — and it IS truncated, deliberately: on touch
+             * the head is part of the drag region, so it must not grow with a
+             * long title. See the shared title rule in overlays.css.
+             *
+             * Both are set in one place because they must never disagree, and
+             * called with no item to put the overlay back to its authored state.
+             */
+            function setTrailerLabel(title, year) {
+                const named = title ? (year ? title + ' (' + year + ')' : title) : 'Trailer';
+                trailerTitle.textContent = named;
+                trailerPanel.setAttribute('aria-label', title ? 'Trailer: ' + named : 'Trailer');
+            }
+
+            /**
+             * Swap the indicator between looking-for-it and it-did-not-load.
+             *
+             * Toggling siblings rather than rewriting the indicator's markup:
+             * the error used to be written over .trailer-loading's innerHTML,
+             * which destroyed the spinner, so closing had to rebuild it from a
+             * string that duplicated the authored markup.
+             */
+            function showTrailerError(failed) {
+                trailerSpinner.hidden = failed;
+                trailerStatus.hidden = failed;
+                trailerError.hidden = !failed;
+            }
 
             // Check if we're on a mobile device
             const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || window.innerWidth < 768;
 
             // Function to open trailer modal with the correct title and year
             function openTrailer(title, year) {
+                // Name the overlay before it opens, so the head never shows the
+                // previous item's title for a frame.
+                setTrailerLabel(title, year);
+
                 // Show the loading indicator
+                showTrailerError(false);
                 trailerLoading.classList.remove('hidden');
 
                 // Clear previous iframe
@@ -4990,26 +5123,28 @@
                 iframe.style.opacity = '0';
                 iframe.style.transition = 'opacity 0.3s ease';
 
+                // Hand the well over to the video.
+                //
+                // Refused while the error line is showing. Both callers below
+                // are unconditional timers, so without this the error is
+                // uncovered by the 3s fallback a moment after it appears and the
+                // failure state can never be read — a state that renders for an
+                // instant and then hides itself is not a state anyone receives.
+                function revealTrailer() {
+                    if (!trailerError.hidden) return;
+                    trailerLoading.classList.add('hidden');
+                    iframe.style.opacity = '1';
+                }
+
                 // Add load event listener to hide the loading indicator
                 iframe.onload = function () {
                     // Set a short delay before showing the iframe to wait for content inside to load
-                    setTimeout(() => {
-                        // Hide the loading indicator
-                        trailerLoading.classList.add('hidden');
-
-                        // Show the iframe
-                        iframe.style.opacity = '1';
-                    }, 700); // Short delay for better user experience - adjust if needed
+                    setTimeout(revealTrailer, 700);
                 };
 
                 // Add error event listener
                 iframe.onerror = function () {
-                    // Update loading indicator to show error
-                    trailerLoading.innerHTML = `
-            <div class="trailer-loading-text" style="color: #ff4444;">
-                Failed to load trailer. Please try again later.
-            </div>
-        `;
+                    showTrailerError(true);
                 };
 
                 // Add the new iframe
@@ -5017,10 +5152,7 @@
 
                 // Set a timeout to hide the loading indicator even if onload doesn't trigger
                 // This can happen with some embedded content
-                setTimeout(() => {
-                    trailerLoading.classList.add('hidden');
-                    iframe.style.opacity = '1';
-                }, 3000); // Reduced timeout to 3 seconds
+                setTimeout(revealTrailer, 3000);
             }
 
             /**
@@ -5044,9 +5176,12 @@
                     if (isOverlayOpen('trailerOpen')) return;
 
                     trailerLoading.classList.remove('hidden');
-                    trailerLoading.innerHTML =
-                        '<div class="trailer-spinner"></div>' +
-                        '<div class="trailer-loading-text">Loading trailer...</div>';
+                    showTrailerError(false);
+
+                    // Back to the authored title. Left set, the next open would
+                    // show the previous item's name for the frame before its own
+                    // arrives.
+                    setTrailerLabel(null, null);
 
                     const existingIframe = trailerContainer.querySelector('iframe');
                     if (existingIframe) existingIframe.remove();

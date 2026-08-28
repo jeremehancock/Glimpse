@@ -5,10 +5,14 @@
    a DIALOG (.modal) centres and scales. Both carry a backdrop, a grab handle, a
    titled head, and a body that scrolls.
 
-   Which shape an overlay wears is a product decision per overlay, not a
-   breakpoint: the detail view is a tray on a phone and a dialog on a desktop,
-   but the trailer is a dialog everywhere because it is sized to a video, and a
-   tray's job is to fill the width of a screen.
+   Every overlay is a tray on a phone and a dialog on a desktop. There is no
+   longer one that is a dialog at every width, and the exception that used to be
+   here is worth recording: the trailer stayed centred on the argument that it is
+   sized to its video's aspect ratio while a tray's job is to fill the width of a
+   screen. That describes a desktop. At touch widths a tray IS the width of the
+   screen, so a full-width 16:9 video fills it exactly and there is nothing to
+   letterbox against — the reasoning was right about a shape and wrong about
+   where it applied.
 
    Ported from Marquee. The comments that survive the port are the ones that
    record a decision someone would otherwise undo.
@@ -172,6 +176,46 @@
     font-size: 1.1rem;
 }
 
+/* A head title is bounded to ONE line, and it is stated here for both heads
+   rather than on the one overlay that needed it first.
+
+   The trailer is that overlay: it is the first head in the app whose title is
+   DATA rather than a constant, and it has to be bounded because on touch the
+   head is part of the drag region — a head that grows with its title is a drag
+   region whose height depends on which item was opened. Every other head holds a
+   short fixed string, so this changes nothing visible for them today. Stating it
+   once means the next data-driven head is right by default.
+
+   `min-width: 0` is the load-bearing declaration and the one that reads like
+   boilerplate. These titles are flex children, and a flex item's default
+   `min-width: auto` refuses to shrink below its own content — so without it a
+   long title does not truncate, it pushes the close button out through the side
+   of the panel.
+
+   A LINE CLAMP and not `white-space: nowrap`, because the two heads are not the
+   only rule in play. The detail overlay's title is data too and is deliberately
+   allowed three lines by `.modal__fixed .modal-title` in index.html, which is
+   (0,2,0) to this rule's (0,1,1) and therefore wins on the clamp alone. Nowrap
+   sets a property that rule does not, so it would have won everywhere and
+   silently flattened that title to one line. A clamp composes: this states the
+   default, an overlay with the room states its own.
+
+   NO `line-height`, here or in either title rule. The heads' matching padding is
+   only half of what holds every overlay's title the same distance below the grab
+   handle; the other half is the title's inherited half-leading, because the gap
+   the eye measures runs to the glyph rather than to the top of the line box. An
+   override here is the edit most likely to undo that quietly — it changes
+   nothing about the padding anyone would think to check. */
+.sheet__title,
+.modal__head h2 {
+    min-width: 0;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 1;
+    line-clamp: 1;
+    overflow: hidden;
+}
+
 /* --------------------------------------------------------------------------
    Dialog
    -------------------------------------------------------------------------- */
@@ -211,10 +255,18 @@
     width: min(900px, 100%);
 }
 
-/* Sized to a 16:9 video rather than to the screen. */
+/* Sized to a 16:9 video rather than to the screen. This modifier SIZES, and
+   does nothing else.
+
+   It also set `background: #000`, which made the trailer the one panel in the
+   app not drawn from --surface: a pure black head sitting beside every other
+   overlay's #2a2a2a, and a per-server accent that stopped at this overlay's
+   border. Black belongs to the WELL the video sits in — a video letterboxes
+   against its own container, which is a property of the medium rather than a
+   theme choice — and it is scoped there, on `.trailer-container` in index.html,
+   which says so at the rule. */
 .modal__panel--video {
     width: min(960px, 100%);
-    background: #000;
 }
 
 .modal__body {
@@ -477,8 +529,13 @@
        grip that is `display: none`, so the selector alone says "has a grip in
        the markup" — the breakpoint supplies "and it is hidden". That is the
        same breakpoint hiding it, immediately above, and the two must not drift
-       apart. The trailer has no grip at any width and is deliberately
-       untouched: it never had a handle to compensate for. */
+       apart.
+
+       The trailer used to be named here as permanently exempt — it had no grip
+       at any width, so it had no handle to compensate for. It has one now, and
+       takes this compensation with every other overlay. The rule needed no
+       edit for that, which is the point of keying it on the markup rather than
+       on a list of overlay names. */
     .sheet__grip ~ .sheet__head,
     .sheet__grip ~ .modal__head {
         padding-top: 18px;
@@ -504,9 +561,19 @@
 
    Below this width a dialog that opted in becomes a tray: docked to the bottom
    edge, full width, square-shouldered at the bottom, with its grab handle back.
-   Opting in is `.modal--tray-on-touch`, so an overlay sized to its content —
-   the trailer, the roulette spinner — stays centred.
-   -------------------------------------------------------------------------- */
+   Opting in is `.modal--tray-on-touch`.
+
+   Every dialog in the app opts in, so the modifier now records that a panel
+   carries the regions a tray needs rather than that it was chosen for the
+   shape. It is kept as an explicit opt-in for exactly that reason: the modifier
+   HIDES the × below this width, so applying it to a panel with no grab handle
+   would produce an overlay with no visible way out. The modifier and the grip
+   arrive together or not at all.
+
+   The comment here used to name the trailer and the roulette as content-sized
+   overlays that stay centred. The roulette had already opted in; the trailer
+   has now. A comment listing exceptions is a registry by another route, and it
+   went stale the same way one does. */
 
 @media (max-width: 767px) {
     .modal--tray-on-touch {
