@@ -300,6 +300,42 @@ those tags.
       matches a `display: none` grip, so the selector alone means "has a grip in
       the markup" and the breakpoint supplies the rest. Same pairing rule as the
       affordances — split them and a width exists with the wrong spacing.
+  - **Inside an overlay's body, a heading stands HALF the distance it stands
+    from the block above it.** One `--overlay-section-gap`, and the heading's
+    own margin is `calc(… / 2)` — the relation lives in the code, so moving the
+    token moves both halves and no build can put a heading equidistant between
+    two sections. Proximity is the only thing that says a heading belongs to what
+    follows it; the detail overlay had the pair inverted, 5px above against 15px
+    below, so every heading read as a footer for the section before it and the
+    body read as one undifferentiated column. The division under a pinned region
+    reads the gap whole: it is the body's heaviest break and may not be its
+    smallest. Measured, before and after: heading gaps 27.9/20.2/20.2/24.2 →
+    15.1 across the board, section gaps 15.8/10.2/10.2 → 27.1.
+    - **Bare prose withdraws its own half-leading at a section's edges;
+      `.modal-prose` is that trim.** The eye reads text to the **glyph** and a
+      filled object — a genre pill, a cast card — to its **edge**, so identical
+      margins leave visibly different gaps depending on which is on each side of
+      them. Here that was 5.6px on a 24px gap. Same principle as the two heads
+      above, one level down: half-leading is part of every distance anyone
+      measures, whether or not a rule mentions it.
+    - **The trim is derived from the leading, never written as `-0.35em`.** A
+      literal is a second copy of `1.7`, and when they drift nothing fails — the
+      gaps merely stop being equal. So `.modal-prose` declares `--prose-leading`
+      and both `line-height` and `margin-block` read it.
+    - **It rides on margin collapsing through `.modal-section`.** Give that
+      element padding, a border, or a formatting context of its own
+      (`overflow`, `display: flex`) and the trim stops escaping: every prose gap
+      silently grows by the half-leading, from an edit that looks like it has
+      nothing to do with spacing. `tests/test_detail_spacing.py` refuses those
+      four properties for that reason. Note the placeholders — the no-genres and
+      no-cast lines — reach the same result by the other mechanism: inside a flex
+      or grid container margins do not collapse at all, and the trim shrinks the
+      container to the glyph box directly.
+    - **The gap is stated BETWEEN siblings, not after each one.** A
+      `margin-bottom` on every section adds itself to the body's own
+      `padding-bottom` under the last one, which is how the foot of the body came
+      to be 25px against a 20px inset at its sides — a number nobody chose, and
+      the sum of two rules neither of which was written for it.
   - **A rule that hides a page control must name where that control lives.**
     `.sort-toggle { display: none }` in a mobile media query meant "the header's
     sort controls", but the Actions overlay's body *is* a `.sort-toggle`, so the

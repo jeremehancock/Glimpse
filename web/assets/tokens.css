@@ -51,6 +51,32 @@
        tests/test_overlay_layering.py fails if either name reappears under
        web/. */
 
+    /* --- The rhythm inside an overlay's body -------------------------------
+       ONE break value for a body that has more than one block in it: the gap
+       between two sections, and the gap below the division under a pinned
+       region. A heading stands HALF this distance from the block it introduces,
+       written as a calc() at the rule rather than as a second token here.
+
+       That half is the whole decision. Proximity is what says a heading belongs
+       to the block beneath it, so the gap above a heading must be the larger
+       one; when the smaller gap is above, every heading reads as a footer for
+       the section before it. The detail overlay's body was exactly that — 5px
+       above a heading against 15px below — and it read as one undifferentiated
+       column with the headings in the wrong places.
+
+       A token and not two literals because two rules in two files have to agree
+       about it: `.modal__fixed + .modal__body` in overlays.css and
+       `.modal-section + .modal-section` in index.html. That is the condition
+       this file exists for. And a token rather than a second `--…-heading-gap`
+       beside it because a value that can be edited on its own is how the
+       relation gets broken quietly — the same reasoning that keeps the 992px
+       affordance pair in one media query.
+
+       There is no spacing SCALE here, deliberately. One value has two readers;
+       a --space-1..6 ramp would be five tokens with none, which is the shape of
+       dead code the block above was deleted for. */
+    --overlay-section-gap: 24px;
+
     /* --- Radii --- */
     --radius-sm: 6px;
     --radius-md: 10px;
