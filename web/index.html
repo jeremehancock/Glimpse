@@ -1288,20 +1288,86 @@
             scroll-behavior: smooth;
         }
 
-        .modal-section {
-            margin-bottom: 5px;
+        /* The gap belongs BETWEEN two sections, not after each one.
+
+           It was `.modal-section { margin-bottom: 5px }`, which put a trailing
+           margin under the last section as well — so the space at the foot of
+           the body was 25px against the 20px at its sides, a number nobody
+           chose and the sum of two rules each written for something else.
+           Stated between siblings, the body's padding is the body's padding.
+
+           An adjacent-sibling selector also reaches the Date Added section that
+           `openModal()` appends at runtime, the moment it is inserted. Nothing
+           to add to that markup, nothing to remember — the same reason
+           overlays.js keys on the DOM rather than on a registry. */
+        .modal-section + .modal-section {
+            margin-top: var(--overlay-section-gap);
         }
 
+        /* HALF the gap that stands above it. That is the whole rule: proximity
+           is what says a heading belongs to the block beneath it, and this file
+           had the two the wrong way round — 5px above a heading, 15px below —
+           so every heading read as a footer for the section before it.
+
+           Written as a calc() over the token rather than as a second token
+           holding 12px. The RELATION is the decision, so it lives in the code:
+           moving --overlay-section-gap moves both halves together, and there is
+           no build in which a heading can sit equidistant between two sections.
+
+           `line-height` because a rule that sets a heading's type must set all
+           of it. Leading is not decoration here — the gap the eye measures runs
+           to the glyph, so half the leading sits inside every gap above and
+           below this heading (the same arithmetic as .sheet__title in
+           overlays.css). Left unstated, it was inherited, and `.summary-section`
+           set 1.7 for the summary's prose: the Overview heading alone came out
+           with 7.28px of half-leading against the other three headings' 5.2px,
+           which is why that one heading sat lower and further from its own text.
+           1.3 rather than the inherited 1.5 because a heading of one or two
+           lines does not want prose leading, and less uncheckable half-leading
+           inside gaps whose entire point is being equal is worth having.
+           Unitless, so it survives the 1.1em override at ≤600px. */
         .modal-section-title {
             font-size: 1.3em;
-            margin-bottom: 15px;
+            line-height: 1.3;
+            margin-bottom: calc(var(--overlay-section-gap) / 2);
             color: var(--primary-color);
             font-weight: 600;
         }
 
-        .summary-section {
-            line-height: 1.7;
-            color: var(--light-text);
+        /* Bare text in the overlay's body, and it withdraws its own half-leading
+           at the edges of its section.
+
+           A line box adds half its leading above and below the glyphs. The eye
+           measures bare text to the glyph and a filled object — a genre pill, a
+           cast card — to its edge, so identical margins produce visibly
+           different gaps depending on which kind of content is on each side of
+           them. Here that difference was 5.6px on a 24px gap, better than a
+           quarter: the summary stood 15.8px from the Genres heading while the
+           pills stood 10.2px from the Cast heading, from one shared margin.
+           Trimming the half-leading makes the declared gap and the gap the eye
+           reads the same number.
+
+           The trim is DERIVED from --prose-leading rather than written as
+           -0.35em. A literal is a second copy of the leading, and when the two
+           drift the failure is silent — the gaps look almost right.
+
+           It works by margin collapsing, which is the part to know before
+           editing anything near it. The negative top margin collapses with the
+           heading's margin-bottom; the negative bottom margin collapses out
+           through `.modal-section` and then with the next section's margin-top.
+           So `.modal-section` must never gain padding, a border, or a
+           formatting context of its own (`overflow`, `display: flex`) — any of
+           those stops the collapse and adds 5.6px back to every prose gap, from
+           an edit that looks unrelated to spacing.
+
+           `.summary-section` is gone rather than reduced. Once its line-height
+           moved here, its only other declaration restated the `--light-text`
+           that `body` already sets — and a rule listing properties it does not
+           control is where the next unwanted one goes unnoticed. */
+        .modal-prose {
+            --prose-leading: 1.7;
+            line-height: var(--prose-leading);
+            margin-block: calc((1 - var(--prose-leading)) * 0.5em);
         }
 
         .cast-grid {
@@ -2103,9 +2169,9 @@
                 </div>
             </div>
             <div class="modal__body">
-                <div class="modal-section summary-section">
+                <div class="modal-section">
                     <div class="modal-section-title">Overview</div>
-                    <div id="modal-summary">Loading summary...</div>
+                    <div id="modal-summary" class="modal-prose">Loading summary...</div>
                 </div>
 
                 <div class="modal-section">
@@ -4306,7 +4372,15 @@
                     genresContainer.appendChild(genreElement);
                 });
             } else {
-                genresContainer.innerHTML = '<div>No genres available</div>';
+                // `.modal-prose` here too. This is bare text standing in a
+                // slot that normally holds pills, so without it this is the one
+                // path where the body's rhythm goes back to being uneven — and
+                // it is the path nobody sees, which is why it would never be
+                // reported. (Inside a flex container the margins do not
+                // collapse; the trim shrinks the line box directly instead,
+                // reaching the same result by the other mechanism.)
+                genresContainer.innerHTML =
+                    '<div class="modal-prose">No genres available</div>';
             }
 
             // Set cast
@@ -4324,7 +4398,9 @@
                     castContainer.appendChild(actorElement);
                 });
             } else {
-                castContainer.innerHTML = '<div>No cast information available</div>';
+                // Prose, for the same reason as the no-genres line above.
+                castContainer.innerHTML =
+                    '<div class="modal-prose">No cast information available</div>';
             }
 
             // Add date added information
@@ -4338,7 +4414,7 @@
                 dateSection.className = 'modal-section date-section';
                 dateSection.innerHTML = `
                     <div class="modal-section-title">Date Added</div>
-                    <div id="modal-added-date">${dateAdded}</div>
+                    <div id="modal-added-date" class="modal-prose">${dateAdded}</div>
                 `;
                 document.querySelector('.modal .modal__body').appendChild(dateSection);
             } else {

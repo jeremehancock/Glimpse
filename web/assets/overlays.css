@@ -286,9 +286,15 @@
    thing that reads as content — the detail overlay's "Overview" was doing
    exactly that.
 
-   20px is the body's own horizontal inset, so the distance below the division
-   matches the distance at its sides. A number with a reason rather than one that
-   gets re-guessed.
+   The distance is the body's own section gap, and that replaces an earlier
+   reason. It was 20px to match the body's horizontal inset — a real argument,
+   and the wrong one once the body below has a stated vertical rhythm of its own.
+   The border is the HEAVIEST division in that body, so it cannot also be its
+   smallest gap: at 20px against 24px between sections, the first heading stood
+   nearer the region it is not part of than any other heading stands to its
+   neighbour. Reading --overlay-section-gap gives the body one rule with no
+   exception — a heading stands one separation clear of whatever precedes it,
+   whether that is another section or this border.
 
    Keyed on `.modal__fixed`, NOT on the detail overlay. The rule states the real
    condition — a scrolling body with a pinned region above it — so it is right
@@ -303,7 +309,7 @@
    Overlays with no fixed region — trailer, roulette, genre, server switcher —
    do not match, and keep the spacing their own title bar already gives them. */
 .modal__fixed + .modal__body {
-    padding-top: 20px;
+    padding-top: var(--overlay-section-gap);
 }
 
 /* A dialog may hold content ABOVE its scrolling body that does not scroll with
