@@ -573,6 +573,67 @@ those tags.
     `auto-fill` decides the column count from the width available. Measure from
     the grid's **content** box: it is padded, and using the border box puts every
     row boundary a fifth of a row out.
+    - **And never from a grid that has not been laid out. A hidden grid answers
+      with zeros, not with an error.** A card inside `display: none` measures 0
+      tall, and `getComputedStyle` hands back the *computed* track list rather
+      than the used one — `repeat(auto-fill, minmax(200px, 1fr))` splits into
+      three fragments and yields a column count of 3 that no width ever
+      produced. Both look like measurements. `measureGrid()` therefore writes
+      **nothing** unless the card has height, and records `measured: false`.
+      - **This is the ordinary path, not an exceptional one.**
+        `beginTabTransition()` renders the incoming tab *before*
+        `commitTabState()` makes it active — deliberately, so no part of it is
+        visible before it holds content — so every swipe measured a hidden grid.
+      - **`rowPitch = 0` meant both "not measured" and "windowing off", and that
+        conflation is the whole defect.** Windowing switched off silently, and
+        `sizeSpacer()` then computed `rows * 0 - 15` = `-15px` — an invalid
+        length the CSSOM **discards without a word**, so the spacer kept its old
+        height and the document simply ended after one window. Measured at 390px
+        with 400 shows: **120 of 400 reachable, on a document 21,649px tall
+        against 71,926px.** It scrolled, it looked correct, and it quietly held
+        under a third of the library.
+      - **At phone widths the swipe is the ONLY entrance.**
+        `.header-content .tabs` is `display: none` below 768px, so there was no
+        route on that device that ever measured that tab. A rotation repaired it
+        — `resize` re-measures — which is how it was cornered and is not a fix.
+        A tab is measured in `endTabTransition()`, after the settle, where the
+        scroll restore already forces a layout on a frame with nothing moving.
+        Never in `commitTabState()`: that puts a fresh 120-card layout on the
+        slide's opening frame, the 183.4ms mistake the two-rAF delay exists to
+        avoid.
+      - Decide it from **the measurement**, never from whether the tab is
+        active. A second condition describing the same fact has to be kept in
+        step with every path that renders a hidden grid, and this repo has
+        already shipped a pair meant to be one that drifted. Same reasoning as
+        the overlay system keying on the DOM rather than on a registry.
+  - **Moving the window may not rebuild what is on screen, and the trigger is
+    the window's EDGE, not the viewer's row.** `desiredFirstIndex()` changes
+    every row crossed; the window is sixty rows deep at two columns. Re-rendering
+    on that rebuilt the whole window — every card the viewer was looking at — to
+    change under 2% of what it held. Measured at 2,000 movies, 390px:
+    **55 rebuilds per window traversal, in each direction.**
+    - **That is the flicker, and it is not a network problem.** A rebuilt card
+      starts with no `src`, so its poster returns to a spinner and fades in
+      again. It was reported while scrolling **back up** over posters that had
+      loaded seconds earlier. Sampling every frame of an upward scroll over
+      already-loaded artwork: **266 of 269 frames showed a spinner, at worst on
+      all 8 visible cards. After: 0 of 269.**
+    - **The window is CENTRED on the viewer.** It used to hang below them — four
+      rows above against fifty-six below — so the direction with almost no
+      runway was also the one most likely to be recrossing loaded artwork.
+      Centring is also what makes an edge trigger worth having: half a window of
+      travel either way before anything rebuilds. Traversal cost went 55 → **1**.
+    - **A poster that has already loaded is rebuilt AS loaded** — `src` set, no
+      placeholder, no fade — from a `Set` of paths populated in the existing
+      `onload`. Not per-card listeners; the set holds paths, the browser's cache
+      holds the bytes. A poster that *failed* is never recorded, so it cannot
+      skip the text placeholder it needs.
+    - **Clamp the spacer height at zero even so.** A negative length is invalid
+      CSS and is dropped in silence — that is the mechanism above, and the clamp
+      is the difference between a wrong height and no height at all.
+    - **Proximity to an end of the library is not a reason to move.** There is
+      nothing further to render that way, and treating it as one re-renders
+      every row at the top and bottom — the same defect from its two edges.
   - **The spacers that stand in for unrendered rows must span every column**
     (`grid-column: 1 / -1`). Otherwise `auto-fill` lays one out as an ordinary
     cell, every following card shifts a column, and it reads as an off-by-one in
@@ -582,6 +643,17 @@ those tags.
     it was already true before windowing existed. `tests/test_grid_windowing.py`
     pins the source decisions; `tools/grid_metrics.py` against a library seeded
     to thousands produces the numbers. Both halves, or neither is worth having.
+    - **A test can pin the wrong thing and report it as the right one.**
+      `test_scrolling_inside_the_window_does_nothing` asserted
+      `if (first === view.first) return;` — a comparison of the desired *anchor*,
+      which moves every row, not of whether the viewer is inside the window. The
+      guarantee in its own name had never once held on a phone, and the suite
+      stayed green over 55 rebuilds per traversal. **Read what a guard compares,
+      not what it is called.**
+    - **And a probe that returns zero proves nothing until it has returned
+      non-zero against the defect.** Run every browser check against the
+      unmodified page first. The 266/269 above *is* that control; without it,
+      "0 placeholders" is equally consistent with a probe that never worked.
   - **`scroll-behavior: smooth` is set on the document.** Every `scrollTo`
     animates for about a second, so anything measuring a scroll position must
     wait for it to land. Measuring mid-flight reads a position the user never

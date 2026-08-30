@@ -17,6 +17,35 @@ whatever the code does — it was already true before windowing existed. A
 400-item fixture showed nothing wrong here twice, which was not evidence of
 health. Such a test is worse than none, because it reports the guarantee as
 held.
+
+THAT HAPPENED AGAIN, IN THIS FILE. `test_scrolling_inside_the_window_does_nothing`
+pinned `if (first === view.first) return;` — a comparison of the desired ANCHOR
+against the current one, which changes every row the viewer crosses, while the
+window it anchors is sixty rows deep. So the guarantee in the test's own name
+had never once held on a phone, and the suite stayed green over a defect that
+rebuilt every card on screen 55 times per window traversal. The test was not
+wrong about the code; it was wrong about what the code meant. Read what a guard
+compares, not what it is called.
+
+What this round could be checked from source: the re-anchor trigger, the
+centring, the refusal to record geometry from a grid without layout, and the
+fast path for an already-loaded poster. What could not: any of the numbers. A
+zero-height measurement needs a browser, and the flicker needs a library large
+enough to scroll a window through. Measured with `tools/browser.py` against a
+seeded container at 390px, 2,000 movies and 400 shows:
+
+    |                                                | before  | after   |
+    | renderWindow calls per traversal, down         |      55 |       1 |
+    | renderWindow calls per traversal, up           |      55 |       1 |
+    | sampled frames showing a spinner, scrolling up | 266/269 |   0/269 |
+    | TV Shows items reachable by scrolling          |  120/400|  400/400|
+    | TV Shows document height                       | 21,649px| 71,776px|
+
+THE CONTROL MATTERS MORE THAN THE AFTER. A probe that returns zero proves
+nothing until it has been shown to return non-zero against the defect, so the
+same probe was run against the unmodified page — that is where 266/269 comes
+from, and without it "0 placeholders" is equally consistent with a probe that
+never worked.
 """
 
 import re
@@ -213,10 +242,164 @@ def test_scroll_updates_are_coalesced_to_a_frame(index):
 
 
 def test_scrolling_inside_the_window_does_nothing(index):
-    """Or the fix reintroduces per-frame work by another route."""
+    """The window moves when the viewer reaches its EDGE, not every row.
+
+    THIS TEST'S PREVIOUS FORM ASSERTED A GUARANTEE THE CODE NEVER PROVIDED. It
+    pinned `if (first === view.first) return;` under this name, and that guard
+    compares the desired ANCHOR against the current one. The anchor is derived
+    from the viewer's row, so it changes every single row they cross — while the
+    window it anchors is sixty rows deep at two columns. So "scrolling inside
+    the window" rebuilt the entire window, including every card on screen, and
+    the test reported the opposite.
+
+    Measured at 2,000 movies on a 390px viewport: 55 rebuilds per window
+    traversal in each direction, against 1 after this changed. Each of those
+    rebuilds returned every visible poster to a loading placeholder, which is
+    what was reported — and it was reported while scrolling BACK UP over
+    posters that had finished loading seconds earlier.
+
+    A test derived from a spec inherits the spec's blind spot. This one did, and
+    it is the reason the defect had a green suite sitting on top of it.
+    """
     body = function_body(index, 'updateGridWindow')
-    assert 'if (first === view.first) return;' in body, (
-        're-rendering is no longer skipped when the window has not moved'
+    assert 'windowNeedsMove(view)' in body, (
+        'the window no longer moves on the viewer reaching its edge; if this is '
+        'back to comparing the desired anchor against the current one, it '
+        'rebuilds every card on screen once per row scrolled'
+    )
+    assert re.search(r'if\s*\(!windowNeedsMove\(view\)\)\s*return', body), (
+        're-rendering is no longer skipped while the viewer is inside the window'
+    )
+
+
+def test_the_window_is_centred_on_the_viewer(index):
+    """Runway in both directions, or scrolling up has none.
+
+    The window used to start `GRID_OVERSCAN_ROWS` above the viewer and run its
+    full depth downward — four rows above against fifty-six below. Upward
+    scrolling therefore had four rows of margin, and upward scrolling is the
+    direction most likely to be crossing artwork the viewer has already loaded.
+    """
+    body = function_body(index, 'desiredFirstIndex')
+    assert 'viewportRows(view)' in body, (
+        'the window no longer accounts for what the viewport shows, so it '
+        'cannot be centred on the viewer'
+    )
+    assert 'windowRows(view)' in body, 'the window size is no longer read here'
+    assert 'data.length - 1' not in body, (
+        'the anchor is clamped to the last ITEM again; that allows a first '
+        'index of length - 1, which renders exactly one card at the foot of a '
+        'large library'
+    )
+
+
+def test_the_window_does_not_chase_an_end_of_the_library(index):
+    """Proximity to an end is not a reason to move.
+
+    There is nothing further to render in that direction, so treating it as a
+    reason re-renders on every row at the top and bottom of the grid — the
+    defect this replaced, reached from its two edges.
+    """
+    body = function_body(index, 'windowNeedsMove')
+    assert 'totalRows(view)' in body, (
+        'windowNeedsMove() no longer knows where the library ends, so it will '
+        'ask for a window past it once per row'
+    )
+    assert 'firstRow > 0' in body, (
+        'the top of the library is no longer excluded from the edge trigger'
+    )
+
+
+def test_geometry_is_not_recorded_from_a_grid_without_layout(index):
+    """A hidden grid answers with zeros, not with an error.
+
+    An element inside a `display: none` ancestor has no boxes, so its card
+    measures 0 tall and `getComputedStyle` returns the COMPUTED track list
+    rather than the used one — on a desktop `repeat(auto-fill, minmax(200px,
+    1fr))` splits into three fragments and yields a column count of 3 that no
+    width ever produced. Both look like measurements.
+
+    The incoming tab is rendered while hidden on purpose, so this is the
+    ordinary path, not an exceptional one. Measured before this existed: a phone
+    swiping to a 400-show tab reached item 120 of 400, on a document 21,649px
+    tall against the 71,926px it should have been.
+    """
+    body = function_body(index, 'measureGrid')
+    assert 'view.measured = false' in body, (
+        'measureGrid() no longer records that it could not measure; a failed '
+        'read will be stored as a row pitch of zero and believed'
+    )
+    assert re.search(r'if\s*\(cardHeight\s*<=\s*0\)', body), (
+        'measureGrid() no longer detects a grid that has not been laid out'
+    )
+    # The refusal must come before anything is written, or a hidden grid still
+    # overwrites a good column count with a parsed-but-meaningless one.
+    assert body.index('cardHeight <= 0') < body.index('view.perRow ='), (
+        'the geometry is written before the measurement is checked, so a hidden '
+        'grid still overwrites it'
+    )
+
+
+def test_an_unmeasured_grid_is_distinguishable_from_one_needing_no_window(index):
+    """`rowPitch = 0` meant both, which is why this failed silently.
+
+    A tab that was never measurable presented as a healthy tab that simply ended
+    early — the same shape as a misconfigured install that looks like a working
+    one, which this project refuses everywhere else.
+    """
+    view = function_body(index, 'gridView')
+    assert 'measured: false' in view, (
+        'the grid view no longer carries an explicit measured flag, so an '
+        'unmeasured grid is back to being indistinguishable from a measured one '
+        'whose rows have no height'
+    )
+    body = function_body(index, 'updateGridWindow')
+    assert '!view.measured' in body, (
+        'updateGridWindow() no longer refuses an unmeasured view; it will '
+        'compute a window from placeholder geometry'
+    )
+
+
+def test_a_tab_is_measured_when_it_lands(index):
+    """The swipe is the only way into the other tab at phone widths.
+
+    `.header-content .tabs` is `display: none` below 768px, so a tab reached by
+    the gesture that was never measured is a tab that is never measured at all.
+    A rotation repaired it, because `resize` re-measures — which is not a fix.
+    """
+    body = function_body(index, 'endTabTransition')
+    assert 'measureGrid(' in body, (
+        'the tab that just landed is no longer measured, so a tab rendered '
+        'while hidden keeps placeholder geometry until something resizes'
+    )
+    assert 'renderWindow(' in body, (
+        'the landed tab is measured but its window is never rebuilt from the '
+        'real geometry, so its spacers stay collapsed'
+    )
+
+
+def test_an_already_loaded_poster_is_built_as_loaded(index):
+    """A rebuilt card starts with no `src`, so its poster blinks.
+
+    This is the flicker: moving the window rebuilds every card it holds, and a
+    poster the viewer is looking at returns to its placeholder and fades in
+    again. Measured scrolling back up over loaded posters: 266 of 269 sampled
+    frames showed a spinner, at worst on all 8 visible cards. After: 0 of 269.
+    """
+    body = function_body(index, 'buildCard')
+    assert 'loadedPosters.has(posterPath)' in body, (
+        'buildCard() no longer takes the fast path for a poster that has '
+        'already loaded, so moving the window blinks every card on screen'
+    )
+    assert 'poster loaded' in body, (
+        'the fast path no longer marks the poster loaded, so it will fade in '
+        'from transparent even with its src set'
+    )
+    # The lazy path must survive: a poster that has never loaded still needs its
+    # placeholder and its error handling.
+    assert 'poster-placeholder' in body, (
+        'the lazy path lost its placeholder; a poster that has never loaded now '
+        'shows nothing while it loads'
     )
 
 
