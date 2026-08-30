@@ -2436,6 +2436,22 @@
             return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
         }
 
+        /* Poster paths whose image has loaded at least once this session.
+
+           A window that moves rebuilds its cards, and a rebuilt card starts
+           with no `src` — so its poster returns to a spinner and fades in
+           again, over artwork the viewer is looking at and has already seen.
+           This is what let the flicker be reported while scrolling BACK UP
+           through posters that had finished loading seconds earlier.
+
+           Holding the paths rather than the images: the browser's own cache
+           holds the bytes, and `/data/` is served with a seven-day max-age, so
+           a card built with its `src` already set paints from cache without an
+           observer round trip, a load event, or a fade. Bounded by the number
+           of distinct posters the viewer has actually scrolled past, not by
+           library size. */
+        const loadedPosters = new Set();
+
         // Set up Intersection Observer for lazy loading
         const imageObserver = new IntersectionObserver((entries) => {
             entries.forEach(entry => {
@@ -2445,6 +2461,9 @@
 
                     img.onload = () => {
                         img.classList.add('loaded');
+                        // Recorded where the load is already being watched, so
+                        // no card gains a listener of its own for this.
+                        loadedPosters.add(img.dataset.src);
                         if (placeholder) {
                             placeholder.style.opacity = '0';
                             setTimeout(() => {
@@ -2753,6 +2772,32 @@
                that is supposed to be invisible. */
             if (restoreY !== null && restoreY !== undefined) {
                 window.GlimpseOverlays.scrollPageTo(restoreY, 'instant');
+            }
+
+            /* The incoming tab is measured HERE, because this is the first
+               moment it has ever been laid out.
+
+               It was rendered in `beginTabTransition()` while it was still
+               hidden and still not the active tab — deliberately, so that no
+               part of it is visible before it holds its content — and a hidden
+               grid cannot be measured. On a phone the tab pills are hidden
+               below 768px, so the swipe is the ONLY way into the other tab:
+               there was no route on that device that ever measured it. It
+               rendered one window, its spacers collapsed, and the rest of the
+               library sat beyond the end of the document. A rotation repaired
+               it, because `resize` re-measures — which is how the defect was
+               finally cornered, and why waiting for a resize is not a fix.
+
+               Placed after the settle rather than in `commitTabState()` on
+               purpose. This forces a layout, and the two-frame delay in
+               `switchTabAnimated()` exists precisely to keep a layout of a
+               fresh 120-card grid off the slide's opening frame — 183.4ms of a
+               280ms animation, the last time that was got wrong. Here nothing
+               is moving, which is the same reason the scroll restore above is
+               allowed to force one. */
+            const landed = activeGridView();
+            if (landed && landed.data.length > 0 && measureGrid(landed)) {
+                renderWindow(landed, desiredFirstIndex(landed), false);
             }
         }
 
@@ -3846,6 +3891,24 @@
                 perRow: 1,
                 rowPitch: 1,
                 rowGap: 0,
+                /* Whether `perRow` and `rowPitch` above were ever read from a
+                   grid that had been laid out.
+
+                   This is a SEPARATE flag rather than a sentinel pitch, because
+                   a pitch of zero already means something: it is what a hidden
+                   grid reports, and it reads as a successfully measured grid
+                   whose rows have no height. Every consequence then follows
+                   silently — the window arithmetic divides by it, the spacers
+                   compute to negative lengths the browser discards as invalid,
+                   and the tab ends after one window with the rest of the library
+                   beyond any scroll. Measured before this flag existed: a phone
+                   swiping to a 400-show tab reached item 120 of 400, on a
+                   document 21,649px tall against the 71,926px it should be.
+
+                   "Never measured" and "needs no window" have to be
+                   distinguishable, or a grid that was never measurable presents
+                   as a healthy one. */
+                measured: false,
                 topSpacer: makeSpacer(),
                 bottomSpacer: makeSpacer(),
                 /* What this view last rendered, as a signature — see
@@ -3895,6 +3958,38 @@
            breakpoint did not anticipate — the same class of mistake as the
            hardcoded 280px backdrop height this project already paid for. */
         function measureGrid(view) {
+            /* THE CARD IS READ FIRST, AND NOTHING IS WRITTEN UNTIL IT ANSWERS.
+
+               A grid with no layout does not report an error — it reports
+               zeros. An element inside a `display: none` ancestor has no boxes,
+               so its card measures 0 tall, and `getComputedStyle` hands back
+               the COMPUTED track list rather than the used one: on a desktop
+               `repeat(auto-fill, minmax(200px, 1fr))` splits into three
+               fragments and yields a column count of 3 that no width ever
+               produced. Both numbers look like measurements.
+
+               So a failed read leaves the view's geometry untouched and says
+               so. It is decided from the measurement itself and NOT from
+               whether the tab is displayed: a second condition describing the
+               same fact has to be kept in step with every path that renders a
+               hidden grid — `beginTabTransition()`, `warmInactiveTab()`, and
+               whatever is added next — and this repo has already shipped a pair
+               of conditions that were meant to be one and drifted. A
+               measurement that can tell it failed cannot drift from itself.
+               Same reasoning as the overlay system keying on the DOM rather
+               than on a registry.
+
+               A missing card and a card with no height take the same branch on
+               purpose. `displayMedia()` calls this before its first render,
+               when there is nothing to measure yet; that is the same "not
+               measurable" answer, and it needs no second condition either. */
+            const card = view.grid.querySelector('.media-item');
+            const cardHeight = card ? card.getBoundingClientRect().height : 0;
+            if (cardHeight <= 0) {
+                view.measured = false;
+                return false;
+            }
+
             const styles = getComputedStyle(view.grid);
             const columns = styles.gridTemplateColumns.split(' ').filter(Boolean);
             view.perRow = Math.max(1, columns.length);
@@ -3904,11 +3999,9 @@
                fifth of a row out — not enough to look broken, enough to pick
                the wrong row near the threshold. */
             view.padTop = parseFloat(styles.paddingTop) || 0;
-
-            const card = view.grid.querySelector('.media-item');
-            const cardHeight = card ? card.getBoundingClientRect().height : 0;
-            // Fall back to one row of everything until a card exists to measure.
-            view.rowPitch = cardHeight > 0 ? cardHeight + view.rowGap : 0;
+            view.rowPitch = cardHeight + view.rowGap;
+            view.measured = true;
+            return true;
         }
 
         // Whole rows only: a partial row would leave a ragged edge mid-grid.
@@ -3926,9 +4019,72 @@
             return Math.floor((window.scrollY - contentTop) / view.rowPitch);
         }
 
+        // How many rows the viewport can show at once, rounded up.
+        function viewportRows(view) {
+            if (view.rowPitch <= 0) return 1;
+            return Math.max(1, Math.ceil(window.innerHeight / view.rowPitch));
+        }
+
+        function totalRows(view) {
+            return Math.ceil(view.data.length / view.perRow);
+        }
+
+        /* Where the window sits: CENTRED on the viewer, not hung below them.
+
+           It used to start `GRID_OVERSCAN_ROWS` above the viewer and run the
+           window's full depth downward — four rows above against fifty-six
+           below at two columns. Scrolling DOWN then had most of a window in
+           hand while scrolling UP had four rows, so the direction with almost
+           no runway was also the one most likely to be travelling back over
+           artwork the viewer had already loaded. That is the case they
+           reported.
+
+           Centring is also what makes the edge trigger below worth having: from
+           the middle, the viewer can travel about half a window in EITHER
+           direction before anything has to be rebuilt.
+
+           The clamp is against the last full window rather than against the
+           last item. `Math.min(start, data.length - 1)` allowed a first index
+           of `length - 1`, which renders exactly one card at the foot of a
+           large library — the count is `total - first`. Clamping to
+           `totalRows - windowRows` keeps a full window against the end. */
         function desiredFirstIndex(view) {
-            const startRow = Math.max(0, firstVisibleRow(view) - GRID_OVERSCAN_ROWS);
-            return Math.min(startRow * view.perRow, Math.max(0, view.data.length - 1));
+            const rows = windowRows(view);
+            const lead = Math.max(0, Math.floor((rows - viewportRows(view)) / 2));
+            const lastStart = Math.max(0, totalRows(view) - rows);
+            const startRow = Math.min(Math.max(0, firstVisibleRow(view) - lead), lastStart);
+            return startRow * view.perRow;
+        }
+
+        /* Whether the viewer has come close enough to an edge of what is
+           rendered that the window has to move.
+
+           THE TRIGGER IS THE EDGE, NOT THE ROW. `desiredFirstIndex()` changes
+           every time the viewer crosses a single row, and re-rendering on that
+           rebuilt the entire window — sixty rows at two columns — to change
+           under two percent of what it held. Every card the viewer was looking
+           at was destroyed and rebuilt in the process, which is what the
+           flicker was: a rebuilt card starts with no `src`, so its poster
+           returns to a placeholder and fades in again. Measured at 2,000
+           movies on a 390px viewport: 55 rebuilds per window traversal, in each
+           direction.
+
+           Proximity to an end of the LIBRARY is not a reason to move — there is
+           nothing further to render that way, and treating it as one would
+           re-render on every row at the top and bottom of the grid, which is
+           exactly the defect this replaces. */
+        function windowNeedsMove(view) {
+            const perRow = view.perRow;
+            const firstRow = Math.floor(view.first / perRow);
+            const lastRow = firstRow + Math.ceil(view.rendered / perRow) - 1;
+            const viewerTop = firstVisibleRow(view);
+            const viewerBottom = viewerTop + viewportRows(view);
+
+            if (firstRow > 0 && viewerTop - firstRow < GRID_OVERSCAN_ROWS) return true;
+            if (lastRow < totalRows(view) - 1 && lastRow - viewerBottom < GRID_OVERSCAN_ROWS) {
+                return true;
+            }
+            return false;
         }
 
         function renderWindow(view, first, animate) {
@@ -3962,7 +4118,15 @@
             view.first = first;
             view.rendered = count;
 
-            view.grid.querySelectorAll('.poster').forEach(img => imageObserver.observe(img));
+            /* Only the posters that still need loading. One built with its
+               `src` already set has nothing for the observer to do, and
+               observing it would put it back on the lazy path it was built to
+               skip. The unobserve above stays broad — it is a no-op for an
+               element that was never observed, and a narrow one would have to
+               be kept in step with this selector to avoid leaking the targets
+               windowing exists to bound. */
+            view.grid.querySelectorAll('.poster[data-src]')
+                .forEach(img => imageObserver.observe(img));
         }
 
         function sizeSpacer(spacer, rows, view) {
@@ -3972,8 +4136,17 @@
                 return;
             }
             spacer.style.display = '';
-            // The spacer's own trailing gap is part of the rows it replaces.
-            spacer.style.height = `${rows * view.rowPitch - view.rowGap}px`;
+            /* The spacer's own trailing gap is part of the rows it replaces.
+
+               Clamped at zero because a negative length is INVALID CSS and the
+               CSSOM discards it silently: the assignment is rejected, the
+               property keeps whatever it had, and the document is quietly short
+               by every row the spacer was standing in for. That is how an
+               unmeasured grid used to end after its first window — `rows * 0 -
+               15` is `-15px`, dropped without a word. An unmeasured view no
+               longer reaches this, but the clamp stays: it is the difference
+               between a wrong height and no height at all. */
+            spacer.style.height = `${Math.max(0, rows * view.rowPitch - view.rowGap)}px`;
         }
 
         function buildCard(view, index, animationOrder) {
@@ -4007,14 +4180,34 @@
 
             const addedDate = formatDate(item.addedAt);
 
-            mediaItem.innerHTML = `
-                <div class="poster-container">
-                    <div class="poster-placeholder">
+            /* A poster that has already loaded is built AS loaded: `src` set,
+               no placeholder, no entrance fade. The browser paints it from
+               cache on this frame, so moving the window over artwork the viewer
+               is looking at is invisible rather than a blink.
+
+               The lazy path is unchanged for a poster that has never loaded —
+               it keeps `data-src`, its placeholder and its error handling, and
+               it is the only path `imageObserver` is given. A poster that
+               failed is never recorded, so it cannot reach this branch and skip
+               the text placeholder it needs.
+
+               The trade is that a known-loaded poster carries no `onerror`. For
+               it to fail now, its image would have to be evicted from the HTTP
+               cache and the network be gone — at which point the alt text
+               stands in, and the cost of the alternative is a listener on every
+               card, which is the thing this grid may not do. */
+            const posterMarkup = loadedPosters.has(posterPath)
+                ? `<img src="${posterPath}" alt="${item.title}" class="poster loaded">`
+                : `<div class="poster-placeholder">
                         <div class="loading-spinner"></div>
                     </div>
                     <img data-src="${posterPath}"
                          alt="${item.title}"
-                         class="poster">
+                         class="poster">`;
+
+            mediaItem.innerHTML = `
+                <div class="poster-container">
+                    ${posterMarkup}
                 </div>
                 <div class="media-info">
                     <div class="media-title">${item.title}</div>
@@ -4055,10 +4248,25 @@
                drift from itself. */
             if (tabGestureActive()) return;
 
-            if (!view || view.data.length === 0 || view.rowPitch <= 0) return;
-            const first = desiredFirstIndex(view);
-            if (first === view.first) return;
-            renderWindow(view, first, false);
+            if (!view || view.data.length === 0) return;
+
+            /* A view that has never been measurable is repaired here rather
+               than left refusing forever.
+
+               `endTabTransition()` measures a tab as it lands, which is the
+               deterministic path. This is the safety net for any other route
+               that renders a grid before it is displayed: the measurement is
+               attempted once the grid is on screen, and until one succeeds the
+               window is not moved. Rendering from placeholder geometry is what
+               produced a tab that scrolled, looked correct, and quietly held a
+               third of its library. */
+            if (!view.measured && !measureGrid(view)) return;
+
+            /* Only when the viewer has reached an edge — see
+               `windowNeedsMove()`. This used to compare the desired anchor
+               against the current one, which moves every row. */
+            if (!windowNeedsMove(view)) return;
+            renderWindow(view, desiredFirstIndex(view), false);
         }
 
         function activeGridView() {
@@ -4090,7 +4298,11 @@
                 // `perRow` changes with width, so every row index computed for
                 // the old column count is wrong. Re-measure, then re-render
                 // from where the viewer is rather than from the top.
-                measureGrid(view);
+                /* A resize that cannot measure changes nothing. It is
+                   reachable: the viewport can change while this tab is hidden.
+                   Re-rendering from the old column count would be worse than
+                   waiting for the tab to land and be measured there. */
+                if (!measureGrid(view)) return;
                 renderWindow(view, desiredFirstIndex(view), false);
             });
         })();
@@ -4176,16 +4388,23 @@
             measureGrid(view);
             renderWindow(view, 0, animateCards);
 
-            if (view.rowPitch <= 0) {
-                // No card had been laid out yet, so the pitch was unknown and
-                // the spacers were sized against nothing. Now one exists.
-                //
-                // This branch is always taken for a tab being rendered for the
-                // first time — no card of that type has ever been laid out — so
-                // the first tab switch pays for two windows, not one. That is
-                // the frame budget a slide is competing with.
-                measureGrid(view);
-                renderWindow(view, 0, animateCards);
+            if (!view.measured) {
+                /* No card had been laid out yet, so the geometry was unknown
+                   and the spacers were sized against nothing. Now one exists.
+
+                   This branch is always taken for a tab being rendered for the
+                   first time — no card of that type has ever been laid out — so
+                   the first tab switch pays for two windows, not one. That is
+                   the frame budget a slide is competing with.
+
+                   The second pass STILL FAILS when this grid is hidden, which
+                   is the ordinary case: `beginTabTransition()` renders the
+                   incoming tab before it is displayed. That failure is now
+                   recorded rather than mistaken for a measurement of zero, and
+                   `endTabTransition()` takes it again once the tab has landed.
+                   Rendering once from placeholder geometry is fine — nothing is
+                   on screen to be wrong. Believing it afterwards was not. */
+                if (measureGrid(view)) renderWindow(view, 0, animateCards);
             }
         }
 

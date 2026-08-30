@@ -260,9 +260,17 @@ def test_the_windowing_refusal_stands_on_its_own(index):
         'updateGridWindow() does not refuse while a tab gesture is live -- the '
         'window would be computed from a tab pinned at a captured offset'
     )
-    assert body.index('tabGestureActive()') < body.index('rowPitch'), (
-        'the windowing guard runs after the geometry checks rather than first'
-    )
+    # Named individually rather than by whatever the first geometry call
+    # happens to be. This assertion used to reference `rowPitch`, which stopped
+    # appearing in this function when the measurement moved behind an explicit
+    # `measured` flag -- and an assertion that raises ValueError because its
+    # needle is gone reports as a crash rather than as the guarantee it was
+    # protecting.
+    for later in ('measureGrid', 'windowNeedsMove', 'desiredFirstIndex'):
+        assert later in body, f'updateGridWindow() no longer calls {later}'
+        assert body.index('tabGestureActive()') < body.index(later), (
+            f'the windowing guard runs after {later} rather than first'
+        )
 
 
 def test_layer_promotion_is_declared_on_the_setup_state_not_the_slide(index):
