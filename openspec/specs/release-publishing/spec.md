@@ -1,7 +1,11 @@
 # release-publishing Specification
 
 ## Purpose
-TBD - created by archiving change modernize-ci-action-runtimes. Update Purpose after archive.
+How a commit becomes a published image: the branch-to-Docker-tag mapping, the
+`VERSION`-driven release, and the GitHub Actions workflows that build and
+publish it, with every action's version pinned and asserted exactly so that an
+upgrade is a deliberate change that does not alter what is published. This is
+build and release behaviour, not a capability of the running app.
 ## Requirements
 ### Requirement: No workflow action runs on a deprecated runtime
 

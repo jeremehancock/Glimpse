@@ -1,7 +1,13 @@
 # application-shell Specification
 
 ## Purpose
-TBD - created by archiving change replace-boot-time-html-rewriting. Update Purpose after archive.
+The container that holds the app together: the entrypoint that turns the
+environment into the two generated files, `config.json` and `manifest.json`,
+without touching anything authored; the `config.json` contract the frontend
+reads once at boot and reports loudly when it is missing or malformed; nginx
+routing, supervisord and the cron wiring for each configured server; and the
+per-server fingerprint that lets a restart skip an import whose settings have
+not changed.
 ## Requirements
 ### Requirement: The entrypoint generates files and never mutates authored ones
 

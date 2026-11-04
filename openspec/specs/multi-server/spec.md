@@ -1,7 +1,11 @@
 # multi-server Specification
 
 ## Purpose
-TBD - created by archiving change replace-boot-time-html-rewriting. Update Purpose after archive.
+Running one install against more than one media server: detecting which of
+Plex, Jellyfin and Emby are configured, correcting a `PRIMARY_SERVER` that names
+one that is not, choosing the active server from the URL path, switching between
+servers, and giving each server its own theme, page title and icons from the
+first paint.
 ## Requirements
 ### Requirement: PRIMARY_SERVER is corrected when it names an unusable server
 

@@ -1,7 +1,10 @@
 # sorting Specification
 
 ## Purpose
-TBD - created by archiving change fix-overlay-layering-and-dead-tray-controls. Update Purpose after archive.
+Ordering the library: A to Z and Z to A by title with natural comparison, date
+added in either direction, the `SORT_BY_DATE_ADDED` default, and the sort
+controls that apply that order at every width they are offered, whether in the
+header or inside the Actions tray.
 ## Requirements
 ### Requirement: The sort controls apply the sort at every width they are offered
 

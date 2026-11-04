@@ -1,7 +1,10 @@
 # roulette Specification
 
 ## Purpose
-TBD - created by archiving change convert-overlays-to-trays. Update Purpose after archive.
+"Roll the Dice": picking a random item from what the grid is currently showing,
+after search and genre filters, in an overlay that says so when there is
+nothing to pick, can always be closed, and returns the viewer to the library
+when its result is dismissed.
 ## Requirements
 ### Requirement: Roulette picks a random item from what is currently shown
 

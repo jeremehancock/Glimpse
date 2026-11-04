@@ -1,7 +1,13 @@
 # visual-design Specification
 
 ## Purpose
-TBD - created by archiving change convert-overlays-to-trays. Update Purpose after archive.
+The shared look and behaviour every screen draws from: the design tokens for
+colour, surface, spacing, motion and stacking order; the one overlay system,
+which is a tray on touch and a dialog on a pointer device, can be dragged down
+to dismiss, locks the page behind it and manages focus so a keyboard user can
+always reach, leave and return from it; page chrome that ranks below every
+overlay; how controls show selection and feedback, with a fill and its label
+changing together; and motion that honours a reduced-motion preference.
 ## Requirements
 ### Requirement: One overlay presentation serves every overlay
 

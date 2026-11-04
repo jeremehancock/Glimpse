@@ -1,7 +1,12 @@
 # pwa Specification
 
 ## Purpose
-TBD - created by archiving change replace-boot-time-html-rewriting. Update Purpose after archive.
+Installing Glimpse as an app and making repeat visits fast: the manifest
+generated for the primary server, the per-server icons and theme colour, the
+service worker that caches artwork and the app's own assets for speed while
+never caching the library data, and the offline page shown when the network is
+gone. A response the server actually returned is never replaced by a cached
+one.
 ## Requirements
 ### Requirement: The manifest is generated for the primary server
 
