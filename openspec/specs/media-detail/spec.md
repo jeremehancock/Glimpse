@@ -1,7 +1,11 @@
 # media-detail Specification
 
 ## Purpose
-TBD - created by archiving change convert-overlays-to-trays. Update Purpose after archive.
+The overlay that opens when an item is chosen: its poster, backdrop, title,
+summary, rating, duration, genres, cast and date added; a pinned region that
+keeps the item's identity in view while the rest scrolls under it; the routes
+out of it to a trailer or to a genre filter; and the spacing rules that make its
+sections read as separate, labelled blocks.
 ## Requirements
 ### Requirement: The detail overlay shows an item's full metadata
 

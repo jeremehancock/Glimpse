@@ -1,7 +1,10 @@
 # genre-filter Specification
 
 ## Purpose
-TBD - created by archiving change convert-overlays-to-trays. Update Purpose after archive.
+Narrowing the library to one genre: the genre list and its counts, derived
+from the loaded snapshot; the genre tray, which is one control at every width
+and presents each genre as a tray choice; and how a chosen genre combines with
+search and sort and returns the grid to its beginning.
 ## Requirements
 ### Requirement: Genres are derived from the loaded library with counts
 

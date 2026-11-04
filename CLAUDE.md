@@ -49,8 +49,12 @@ start writing code from a bare description.
 
 - A change MUST target an existing capability from the map in
   `openspec/config.yaml` — never invent a capability named after the change.
-- Run `openspec validate <change> --strict` before coding. The usual failure is
-  a scenario not using exactly four `#` (`#### Scenario:`).
+- Run `openspec validate <change>` before coding. The usual failure is a
+  scenario not using exactly four `#` (`#### Scenario:`). Fix every warning it
+  prints except "Requirement text is very long": most requirements here carry
+  their reasoning and run past 500 characters, and a `MODIFIED` delta repeats a
+  requirement's full text, which is why `--strict` (it turns every warning into
+  a failure) is not used.
 - Tests are written alongside the implementation and verified at the end of a
   change, not first. Implementation tasks precede their test tasks.
 

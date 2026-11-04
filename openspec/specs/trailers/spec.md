@@ -1,7 +1,10 @@
 # trailers Specification
 
 ## Purpose
-TBD - created by archiving change convert-overlays-to-trays. Update Purpose after archive.
+Playing an item's trailer: an overlay sized to the video that embeds it from
+YouTube using the key in the media server's metadata, names the item it is
+playing, is drawn from the same surface tokens as every other overlay, stops
+playback when closed, and returns to the detail overlay it was opened from.
 ## Requirements
 ### Requirement: Closing a trailer stops playback
 

@@ -1,7 +1,11 @@
 # media-browsing Specification
 
 ## Purpose
-TBD - created by archiving change cache-for-speed-not-for-offline. Update Purpose after archive.
+The library grid: the Movies and TV Shows tabs, showing the current snapshot
+or saying plainly that it could not be loaded; rendering only a window of cards
+near the viewport so the page's cost does not grow with the size of the library,
+while every item stays reachable by scrolling; and moving between tabs, either
+with a tab control or by dragging the two grids sideways with a finger.
 ## Requirements
 ### Requirement: The grid shows the container's current snapshot or says it could not load it
 
