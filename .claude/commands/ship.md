@@ -8,7 +8,7 @@ tags: [workflow, release, git, openspec]
 
 Carry a change the rest of the way: commit, push, archive, PR, and resync `dev`.
 
-This exists so the steps after `/opsx:apply` don't have to be remembered. Run
+This exists so the steps after `/openspec-apply-change` don't have to be remembered. Run
 `/ship` at any point and it works out where things stand and does the next right
 thing. Run it again later and it picks up where it left off.
 
@@ -36,7 +36,7 @@ cat VERSION && gh release view --json tagName --jq .tagName
 
 | State | Do this |
 | --- | --- |
-| Active change, tasks incomplete | Stop. Tell the user to run `/opsx:apply` first — `/ship` does not write code. |
+| Active change, tasks incomplete | Stop. Tell the user to run `/openspec-apply-change` first — `/ship` does not write code. |
 | Uncommitted changes | Run the toolchain gate, then the docs gate (both below), then commit. |
 | Commits on `dev` not pushed | Push to `dev`. CI publishes `bozodev/glimpse-media-viewer:dev`. |
 | Change complete, not archived, `:dev` not yet validated | **Ask the user to test the `:dev` image.** Do not archive before they confirm. |

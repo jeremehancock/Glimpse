@@ -44,7 +44,7 @@ Every capability is defined by an OpenSpec spec **before** it is built. Don't
 start writing code from a bare description.
 
 ```
-/opsx:explore → /opsx:propose → (you review) → /opsx:apply → /ship → /opsx:archive
+/openspec-explore → /openspec-propose → (you review) → /openspec-apply-change → /ship → /openspec-archive-change
 ```
 
 - A change MUST target an existing capability from the map in
@@ -58,7 +58,7 @@ start writing code from a bare description.
 - Tests are written alongside the implementation and verified at the end of a
   change, not first. Implementation tasks precede their test tasks.
 
-## `/ship` owns everything after `/opsx:apply`
+## `/ship` owns everything after `/openspec-apply-change`
 
 Commit, push, VERSION bump, archive, PR, resync. **Use it — don't hand-roll
 those steps.** It detects the current state and does the next right thing, so
@@ -66,7 +66,7 @@ it's safe to run at any point and again later. Running the steps manually
 bypasses its guardrails, which is the main way this project gets broken.
 
 `/ship` does not write code — if tasks are incomplete it stops and sends you
-back to `/opsx:apply`. It never merges a PR, and never bumps `VERSION` without
+back to `/openspec-apply-change`. It never merges a PR, and never bumps `VERSION` without
 asking. `ship.md` is the authority on all of that; don't second-guess it from
 here.
 
