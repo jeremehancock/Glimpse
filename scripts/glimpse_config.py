@@ -31,7 +31,7 @@ import json
 import os
 import sys
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -69,6 +69,32 @@ class NoServerConfiguredError(RuntimeError):
     from a correctly configured server that happens to hold no media — so this
     is fatal rather than a warning.
     """
+
+
+class TokenFileError(RuntimeError):
+    """Raised when a `<SERVER>_TOKEN_FILE` is relied on and cannot supply a token.
+
+    Fatal even when another server is configured. Dropping just this one would
+    start a container that looks like a working install with one server fewer,
+    which is the misconfiguration-that-looks-fine this project refuses
+    everywhere. The message names the variable and the path, never contents.
+    """
+
+
+# Where the fetchers live and write inside the image. Used to build the one
+# command line that both the crontab and the boot fetch run.
+PYTHON = '/usr/local/bin/python'
+SCRIPTS_DIR = '/app/scripts'
+DATA_DIR = '/app/data'
+
+# Emby is fetched by the Jellyfin fetcher: the APIs are compatible, which is why
+# one adapter has always served both. That fetcher is told which of the two it
+# is talking to, because the two servers expect different sign-in headers.
+FETCHERS = {'plex': 'plex', 'jellyfin': 'jellyfin', 'emby': 'jellyfin'}
+
+
+def _read_text(path: Path) -> str:
+    return path.read_text(encoding='utf-8')
 
 
 @dataclass(frozen=True)
@@ -135,6 +161,26 @@ class Server:
         """
         payload = json.dumps(self.fetch_inputs(), separators=(',', ':'))
         return hashlib.sha256(payload.encode('utf-8')).hexdigest()
+
+    @property
+    def exclude_env_var(self) -> str:
+        return f'{self.id.upper()}_EXCLUDE_LIBRARIES'
+
+    def fetch_argv(self) -> list[str]:
+        """The fetch command for this server, as an argument list.
+
+        The one definition of how a server is fetched. `crontab()` renders it as
+        text and `--run-fetch` executes it, so the scheduled fetch and the boot
+        fetch cannot disagree. They used to be built separately: the boot fetch
+        read `*_URL`/`*_TOKEN` from the environment a second time in shell,
+        unstripped, and a token supplied by `_FILE` would never have reached it.
+        """
+        fetcher = FETCHERS[self.id]
+        argv = [PYTHON, f'{SCRIPTS_DIR}/{fetcher}_data_fetcher.py']
+        if fetcher == 'jellyfin':
+            argv += ['--server', self.id]
+        argv += ['--url', self.url, '--token', self.token, '--output', f'{DATA_DIR}/{self.id}']
+        return argv
 
 
 @dataclass(frozen=True)
@@ -210,23 +256,35 @@ class Resolved:
         answered that question in three separate places — detection, the cron
         block, and the switcher — and they drifted.
 
-        Emby is fetched by the Jellyfin fetcher: the APIs are compatible, which
-        is why one adapter has always served both.
+        The command itself comes from `Server.fetch_argv()`, which the boot
+        fetch executes too. cron does not inherit the container's environment,
+        which is why every value is written into the line.
         """
         lines = ['PATH=/usr/local/bin:/usr/bin:/bin:/sbin:/usr/sbin']
         for server in self.servers:
-            fetcher = 'jellyfin' if server.id in ('jellyfin', 'emby') else 'plex'
-            env_var = f'{server.id.upper()}_EXCLUDE_LIBRARIES'
             lines.append(
                 f'{self.cron_schedule} root cd /app && '
-                f'{env_var}="{server.exclude_libraries}" '
-                f'/usr/local/bin/python /app/scripts/{fetcher}_data_fetcher.py '
-                f'--url "{server.url}" --token "{server.token}" '
-                f'--output /app/data/{server.id} '
+                f'{server.exclude_env_var}="{server.exclude_libraries}" '
+                f'{_render_for_cron(server.fetch_argv())} '
                 f'>> /var/log/cron.log 2>&1'
             )
         # cron requires a trailing newline or it silently ignores the last entry.
         return '\n'.join(lines) + '\n'
+
+
+def _render_for_cron(argv: list[str]) -> str:
+    """An argument list as a cron command, in the form this crontab always had.
+
+    The value after `--url` and `--token` is double-quoted and everything else
+    is written bare, exactly as the line was written by hand before, so the Plex
+    entry an existing install gets is byte-for-byte unchanged.
+    """
+    parts: list[str] = []
+    quote_next = False
+    for arg in argv:
+        parts.append(f'"{arg}"' if quote_next else arg)
+        quote_next = arg in ('--url', '--token')
+    return ' '.join(parts)
 
 
 def _is_truthy(value: str | None) -> bool:
@@ -238,18 +296,67 @@ def _is_truthy(value: str | None) -> bool:
     return (value or '').strip().lower() in {'true', '1', 'yes', 'on'}
 
 
-def _detect_servers(env: Mapping[str, str]) -> tuple[Server, ...]:
+def _resolve_token(env: Mapping[str, str], prefix: str, read_file: Callable[[Path], str]) -> str:
+    """`<PREFIX>_TOKEN`, or failing that the contents of `<PREFIX>_TOKEN_FILE`.
+
+    The plain variable always wins, and the file is not even opened when it is
+    set, so an install that names no `_FILE` variable behaves exactly as it did
+    before they existed. `_FILE` is the standard Docker-secrets convention: the
+    variable holds a path such as `/run/secrets/jellyfin_token`.
+
+    A token read from a file is stripped like any other. A secret file almost
+    always ends in a newline, and a newline in a header value is rejected
+    before the request is even sent.
+    """
+    token = (env.get(f'{prefix}_TOKEN') or '').strip()
+    if token:
+        return token
+
+    variable = f'{prefix}_TOKEN_FILE'
+    path_text = (env.get(variable) or '').strip()
+    if not path_text:
+        return ''
+
+    # Never the contents, and never str(exc) for a decode error: that quotes the
+    # offending byte, which is a byte of the secret.
+    try:
+        contents = read_file(Path(path_text))
+    except UnicodeDecodeError:
+        raise TokenFileError(
+            f'Error: {variable} names {path_text}, which is not UTF-8 text'
+        ) from None
+    except OSError as exc:
+        reason = exc.strerror or type(exc).__name__
+        raise TokenFileError(
+            f'Error: {variable} names {path_text}, which could not be read ({reason})'
+        ) from None
+
+    token = contents.strip()
+    if not token:
+        raise TokenFileError(f'Error: {variable} names {path_text}, which is empty')
+    return token
+
+
+def _detect_servers(
+    env: Mapping[str, str], read_file: Callable[[Path], str] = _read_text
+) -> tuple[Server, ...]:
     """Every server with BOTH a URL and a token, in fixed preference order.
 
     Both are required: a URL without a token cannot be queried, and a token
     without a URL has nothing to query. Half-configured is not configured.
+
+    A token file is only consulted for a server that has a URL. A secret
+    mounted for a server the user has not set up is not this server's problem,
+    and failing on it would refuse to start an install that works.
     """
     servers = []
     for server_id in SERVER_IDS:
         prefix = server_id.upper()
         url = (env.get(f'{prefix}_URL') or '').strip()
-        token = (env.get(f'{prefix}_TOKEN') or '').strip()
-        if not url or not token:
+        if not url:
+            continue
+        token = _resolve_token(env, prefix, read_file)
+        if not token:
             continue
         servers.append(
             Server(
@@ -300,13 +407,15 @@ def _resolve_primary(requested: str, servers: tuple[Server, ...]) -> tuple[str, 
     return fallback, tuple(warnings)
 
 
-def resolve(env: Mapping[str, str]) -> Resolved:
+def resolve(env: Mapping[str, str], read_file: Callable[[Path], str] = _read_text) -> Resolved:
     """Turn the environment into every decision the container needs.
 
-    Pure: no I/O, no reads of the real environment, no printing. Raises
-    NoServerConfiguredError when nothing is usable.
+    No reads of the real environment and no printing. The one piece of I/O is
+    reading a `_FILE` token, which goes through `read_file` so a test can pass
+    a fake. Raises NoServerConfiguredError when nothing is usable, and
+    TokenFileError when a token file that was relied on is unusable.
     """
-    servers = _detect_servers(env)
+    servers = _detect_servers(env, read_file)
     if not servers:
         raise NoServerConfiguredError(
             'Error: No valid credentials provided for any media server\n'
@@ -383,6 +492,25 @@ def write_fingerprints(resolved: Resolved, fingerprint_dir: Path) -> None:
         (fingerprint_dir / server.id).write_text(server.fingerprint(), encoding='utf-8')
 
 
+def _run_fetch(resolved: Resolved, server_id: str) -> int:
+    """Replace this process with `server_id`'s fetcher, as its cron entry runs it.
+
+    `execve` rather than a subprocess, so the fetcher's exit status *is* this
+    command's exit status. The entrypoint records a fingerprint only when that
+    status is zero.
+    """
+    server = next((s for s in resolved.servers if s.id == server_id), None)
+    if server is None:
+        print(f'Error: {server_id} is not configured; nothing to fetch', file=sys.stderr)
+        return 1
+
+    argv = server.fetch_argv()
+    environment = {**os.environ, server.exclude_env_var: server.exclude_libraries}
+    sys.stdout.flush()
+    os.execve(argv[0], argv, environment)
+    return 1  # unreachable: execve either replaces the process or raises
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description='Generate config.json and manifest.json from the environment.'
@@ -405,13 +533,26 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Also write each configured server's current settings fingerprint here",
     )
+    parser.add_argument(
+        '--run-fetch',
+        choices=SERVER_IDS,
+        default=None,
+        metavar='SERVER',
+        help=(
+            "Instead of writing anything, run SERVER's fetcher with the resolved "
+            "settings, exactly as its cron entry does. Exits with the fetcher's status."
+        ),
+    )
     args = parser.parse_args(argv)
 
     try:
         resolved = resolve(os.environ)
-    except NoServerConfiguredError as exc:
+    except (NoServerConfiguredError, TokenFileError) as exc:
         print(exc, file=sys.stderr)
         return 1
+
+    if args.run_fetch is not None:
+        return _run_fetch(resolved, args.run_fetch)
 
     for warning in resolved.warnings:
         print(warning)

@@ -52,7 +52,8 @@ context: |
 
   External dependencies (not built here):
     - Plex Media Server HTTP API (X-Plex-Token).
-    - Jellyfin / Emby HTTP API (X-Emby-Token). One adapter serves both.
+    - Jellyfin / Emby HTTP API. One adapter serves both; Jellyfin signs in with
+      `Authorization: MediaBrowser Token="..."`, Emby with X-Emby-Token.
     - YouTube embeds for trailers. The trailer key comes from the media server's
       metadata; Glimpse embeds it and fetches nothing itself.
 

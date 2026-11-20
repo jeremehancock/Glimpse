@@ -73,6 +73,38 @@ All of them come from one resolution so that "which servers are configured" has 
 single implementation — the old script answered it in three places and they
 drifted.
 
+The boot fetch comes from that same resolution. The entrypoint runs
+`glimpse_config.py --run-fetch <server>`, which resolves the environment again
+and executes exactly the command that server's cron entry runs; both are built
+by `Server.fetch_argv()`. The entrypoint never reads `*_URL`, `*_TOKEN` or
+`*_EXCLUDE_LIBRARIES` itself. It used to, unstripped, so the boot fetch and the
+scheduled one could disagree, and a token supplied by `<SERVER>_TOKEN_FILE`
+would never have reached the boot fetch at all.
+
+### Token files
+
+`PLEX_TOKEN_FILE`, `JELLYFIN_TOKEN_FILE` and `EMBY_TOKEN_FILE` name a file whose
+contents are the token: the Docker-secrets convention. They are read **only**
+when the plain `<SERVER>_TOKEN` is empty, so an install that names none of them
+behaves exactly as it did before they existed. `docker-compose.yml` does not
+name them, deliberately: unset is the default, and the default is "as before".
+
+A token read from a file is stripped, and gives the same fingerprint as the same
+token set directly, so moving a token into a secret does not re-import the
+library. A `_FILE` that is relied on and cannot be read, or is blank, stops the
+container with a message naming the variable and the path. It does not drop
+that one server and start the rest: that would look like a working install with
+a server missing.
+
+### Jellyfin and Emby sign in differently
+
+They share one fetcher, run with `--server jellyfin` or `--server emby`.
+Jellyfin is sent `Authorization: MediaBrowser Token="..."`; current Jellyfin
+answers the legacy `X-Emby-Token` header with a 401, which left a Jellyfin
+library silently frozen on its last snapshot. Emby is still sent
+`X-Emby-Token`. The same flag picks which `*_EXCLUDE_LIBRARIES` variable the
+fetcher reads.
+
 ### Which servers import at boot
 
 A restart used to re-import every configured library, and because supervisord
@@ -280,9 +312,11 @@ Run a fetcher by hand to watch it work — `print()` output is the interface, an
 `docker logs` is where a user sees an import run:
 
 ```bash
-docker exec glimpse-media-viewer python3 /app/scripts/plex_data_fetcher.py \
-  --url "$PLEX_URL" --token "$PLEX_TOKEN" --output /app/data/plex
+docker exec glimpse-media-viewer python3 /app/scripts/glimpse_config.py --run-fetch plex
 ```
+
+That runs exactly what the cron entry runs, with the container's own settings,
+including a token supplied by `_FILE`.
 
 ## Multi-arch
 

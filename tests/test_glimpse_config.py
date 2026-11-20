@@ -7,6 +7,7 @@ enumerated.
 """
 
 import json
+import shlex
 
 import pytest
 
@@ -15,6 +16,8 @@ from glimpse_config import (
     DEFAULT_CRON_SCHEDULE,
     THEME_COLORS,
     NoServerConfiguredError,
+    TokenFileError,
+    main,
     resolve,
     write_files,
 )
@@ -365,3 +368,230 @@ def test_written_config_matches_the_resolved_object(tmp_path):
     assert written == resolved.config_json()
     assert written['primaryServer'] == 'jellyfin'
     assert [s['id'] for s in written['servers']] == ['plex', 'jellyfin']
+
+
+# --------------------------------------------------------------------------
+# Token files (`<SERVER>_TOKEN_FILE`)
+# --------------------------------------------------------------------------
+#
+# The standard Docker-secrets convention. Read only when the plain variable is
+# empty, so an install that names no `_FILE` variable behaves as it did before
+# they existed. `docker-compose.yml` does not name them and must not: the
+# fallback when they are unset is "exactly as before", decided on purpose.
+
+
+def token_file(tmp_path, contents, name='token'):
+    path = tmp_path / name
+    path.write_text(contents, encoding='utf-8')
+    return str(path)
+
+
+def jellyfin_by_file(path):
+    return {'JELLYFIN_URL': 'http://jf:8096', 'JELLYFIN_TOKEN_FILE': path}
+
+
+@pytest.mark.parametrize('server_id', ['plex', 'jellyfin', 'emby'])
+def test_a_token_can_come_from_a_file(tmp_path, server_id):
+    prefix = server_id.upper()
+    environment = {
+        f'{prefix}_URL': 'http://media:8096',
+        f'{prefix}_TOKEN_FILE': token_file(tmp_path, 'abc123\n'),
+    }
+    (server,) = resolve(environment).servers
+    assert server.id == server_id
+    # Stripped: a secret file almost always ends in a newline.
+    assert server.token == 'abc123'
+
+
+def test_the_plain_variable_wins_and_the_file_is_never_opened():
+    def must_not_read(path):
+        raise AssertionError(f'read {path} although PLEX_TOKEN was set')
+
+    environment = {
+        'PLEX_URL': 'http://plex:32400',
+        'PLEX_TOKEN': 'from-env',
+        'PLEX_TOKEN_FILE': '/run/secrets/plex',
+    }
+    (server,) = resolve(environment, read_file=must_not_read).servers
+    assert server.token == 'from-env'
+
+
+def test_an_empty_plain_variable_falls_through_to_the_file(tmp_path):
+    """A compose file that keeps `- JELLYFIN_TOKEN=` and adds a `_FILE` works."""
+    environment = {**jellyfin_by_file(token_file(tmp_path, 'abc123')), 'JELLYFIN_TOKEN': ''}
+    assert resolve(environment).servers[0].token == 'abc123'
+
+
+def test_a_token_file_for_a_server_without_a_url_is_ignored():
+    def must_not_read(path):
+        raise AssertionError('read a token file for a server with no URL')
+
+    environment = env(PLEX, EMBY_TOKEN_FILE='/run/secrets/missing')
+    assert [s.id for s in resolve(environment, read_file=must_not_read).servers] == ['plex']
+
+
+def test_a_missing_token_file_is_fatal_even_with_another_server(tmp_path):
+    missing = str(tmp_path / 'missing')
+    with pytest.raises(TokenFileError) as caught:
+        resolve(env(PLEX, **jellyfin_by_file(missing)))
+    assert 'JELLYFIN_TOKEN_FILE' in str(caught.value)
+    assert missing in str(caught.value)
+
+
+@pytest.mark.parametrize('contents', ['', '\n', '   \n\t'])
+def test_a_blank_token_file_is_fatal(tmp_path, contents):
+    path = token_file(tmp_path, contents)
+    with pytest.raises(TokenFileError) as caught:
+        resolve({'EMBY_URL': 'http://emby:8096', 'EMBY_TOKEN_FILE': path})
+    assert 'EMBY_TOKEN_FILE' in str(caught.value)
+    assert path in str(caught.value)
+
+
+def test_a_token_file_error_never_quotes_a_token(tmp_path):
+    secret = 'sk-do-not-leak-me'
+    # A file that is not text: the decode error would otherwise quote a byte.
+    binary = tmp_path / 'binary'
+    binary.write_bytes(b'\xff' + secret.encode())
+    with pytest.raises(TokenFileError) as caught:
+        resolve(env(PLEX, PLEX_TOKEN='', **jellyfin_by_file(str(binary))))
+    message = str(caught.value)
+    assert secret not in message
+    assert '\\xff' not in message and '0xff' not in message
+    assert 'ptok' not in message
+
+
+def test_main_reports_an_unusable_token_file_and_exits_1(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr('os.environ', jellyfin_by_file(str(tmp_path / 'missing')))
+    assert main(['--output', str(tmp_path / 'web')]) == 1
+    assert 'JELLYFIN_TOKEN_FILE' in capsys.readouterr().err
+    assert not (tmp_path / 'web' / 'config.json').exists()
+
+
+def test_moving_a_token_into_a_file_keeps_the_fingerprint(tmp_path):
+    """Or switching an install to Docker secrets would re-import its library."""
+    direct = resolve(env(EMBY)).servers[0]
+    by_file = resolve(
+        {'EMBY_URL': EMBY['EMBY_URL'], 'EMBY_TOKEN_FILE': token_file(tmp_path, 'etok\n')}
+    ).servers[0]
+    assert by_file.fingerprint() == direct.fingerprint()
+
+
+# What the crontab looked like before the fetcher was told its identity. The
+# Plex line must not move by a byte; Jellyfin and Emby may differ only by
+# `--server <id>`.
+LEGACY_LINE = (
+    '0 */6 * * * root cd /app && {var}="" /usr/local/bin/python '
+    '/app/scripts/{fetcher}_data_fetcher.py --url "{url}" --token "{token}" '
+    '--output /app/data/{id} >> /var/log/cron.log 2>&1'
+)
+
+
+def test_the_plex_cron_entry_is_unchanged():
+    entry = resolve(env(PLEX)).crontab().splitlines()[1]
+    assert entry == LEGACY_LINE.format(
+        var='PLEX_EXCLUDE_LIBRARIES',
+        fetcher='plex',
+        url='http://plex:32400',
+        token='ptok',
+        id='plex',
+    )
+
+
+@pytest.mark.parametrize('creds', [JELLYFIN, EMBY], ids=['jellyfin', 'emby'])
+def test_jellyfin_and_emby_entries_differ_only_by_naming_their_identity(creds):
+    (server,) = resolve(creds).servers
+    entry = resolve(creds).crontab().splitlines()[1]
+    legacy = LEGACY_LINE.format(
+        var=f'{server.id.upper()}_EXCLUDE_LIBRARIES',
+        fetcher='jellyfin',
+        url=server.url,
+        token=server.token,
+        id=server.id,
+    )
+    assert entry == legacy.replace(
+        'jellyfin_data_fetcher.py ', f'jellyfin_data_fetcher.py --server {server.id} '
+    )
+
+
+def test_the_unmodified_compose_file_still_resolves_the_same():
+    """Every variable the stock compose file sets, with its placeholder values."""
+    compose_env = {
+        'PRIMARY_SERVER': 'plex',
+        'PLEX_URL': 'http://your-plex-server:32400',
+        'PLEX_TOKEN': 'your-plex-token',
+        'PLEX_EXCLUDE_LIBRARIES': '',
+        'JELLYFIN_URL': 'http://your-jellyfin-server:8096',
+        'JELLYFIN_TOKEN': 'your-jellyfin-api-token',
+        'JELLYFIN_EXCLUDE_LIBRARIES': '',
+        'EMBY_URL': 'http://your-emby-server:8096',
+        'EMBY_TOKEN': 'your-emby-api-token',
+        'EMBY_EXCLUDE_LIBRARIES': '',
+    }
+
+    def must_not_read(path):
+        raise AssertionError('a token file was read with no _FILE variable set')
+
+    resolved = resolve(compose_env, read_file=must_not_read)
+    assert [(s.id, s.url, s.token) for s in resolved.servers] == [
+        ('plex', 'http://your-plex-server:32400', 'your-plex-token'),
+        ('jellyfin', 'http://your-jellyfin-server:8096', 'your-jellyfin-api-token'),
+        ('emby', 'http://your-emby-server:8096', 'your-emby-api-token'),
+    ]
+
+
+# --------------------------------------------------------------------------
+# The boot fetch (`--run-fetch`) runs exactly what cron runs
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize('creds', [PLEX, JELLYFIN, EMBY], ids=['plex', 'jellyfin', 'emby'])
+def test_the_boot_fetch_and_the_cron_entry_are_the_same_command(creds):
+    (server,) = resolve(creds).servers
+    entry = resolve(creds).crontab().splitlines()[1]
+    command = entry.split(' && ', 1)[1].split(' >> ', 1)[0]
+    assignment, rest = command.split(' ', 1)
+    assert assignment == f'{server.exclude_env_var}="{server.exclude_libraries}"'
+    assert shlex.split(rest) == server.fetch_argv()
+
+
+@pytest.mark.parametrize(
+    ('creds', 'server_id'), [(JELLYFIN, 'jellyfin'), (EMBY, 'emby')], ids=['jellyfin', 'emby']
+)
+def test_the_jellyfin_fetcher_is_told_which_server_it_is(creds, server_id):
+    argv = resolve(creds).servers[0].fetch_argv()
+    assert argv[argv.index('--server') + 1] == server_id
+
+
+def test_plex_is_not_passed_an_identity():
+    assert '--server' not in resolve(env(PLEX)).servers[0].fetch_argv()
+
+
+def test_run_fetch_execs_the_fetcher_with_its_own_exclusions(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_execve(path, argv, environment):
+        calls.append((path, argv, environment))
+        raise SystemExit(0)
+
+    environment = {
+        **jellyfin_by_file(token_file(tmp_path, ' jtok \n')),
+        'JELLYFIN_EXCLUDE_LIBRARIES': ' Home Videos ',
+    }
+    monkeypatch.setattr('os.environ', environment)
+    monkeypatch.setattr('os.execve', fake_execve)
+    with pytest.raises(SystemExit):
+        main(['--run-fetch', 'jellyfin'])
+
+    ((path, argv, passed_env),) = calls
+    expected = resolve(environment).servers[0]
+    assert path == argv[0]
+    assert argv == expected.fetch_argv()
+    assert argv[argv.index('--token') + 1] == 'jtok'
+    assert passed_env['JELLYFIN_EXCLUDE_LIBRARIES'] == 'Home Videos'
+
+
+def test_run_fetch_refuses_a_server_that_is_not_configured(monkeypatch, capsys):
+    monkeypatch.setattr('os.environ', dict(PLEX))
+    monkeypatch.setattr('os.execve', lambda *a: pytest.fail('executed a fetcher'))
+    assert main(['--run-fetch', 'emby']) == 1
+    assert 'emby is not configured' in capsys.readouterr().err
