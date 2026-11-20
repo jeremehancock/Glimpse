@@ -155,6 +155,64 @@ http://your-server:9090
 | `APP_TITLE`                  | Custom title for the application          | `Glimpse`                     | No                |
 | `SORT_BY_DATE_ADDED`         | Sort items by date added instead of title | `false`                       | No                |
 
+Each token can instead be read from a file, for use with Docker secrets:
+`PLEX_TOKEN_FILE`, `JELLYFIN_TOKEN_FILE` and `EMBY_TOKEN_FILE`. See
+[Keeping Tokens Out of the Compose File](#keeping-tokens-out-of-the-compose-file).
+
+### Keeping Tokens Out of the Compose File
+
+Your tokens do not have to be written into `docker-compose.yml`. Both ways below
+are optional, and if you use neither, nothing changes.
+
+#### Option 1: a `.env` file
+
+This is a Docker Compose feature and needs nothing from Glimpse, so it works
+with any version. Put the values in a file named `.env` next to
+`docker-compose.yml`:
+
+```bash
+PLEX_TOKEN=your-plex-token
+JELLYFIN_TOKEN=your-jellyfin-api-token
+```
+
+and refer to them in the compose file:
+
+```yaml
+environment:
+  - PLEX_TOKEN=${PLEX_TOKEN:?is not set in .env}
+  - JELLYFIN_TOKEN=${JELLYFIN_TOKEN:?is not set in .env}
+```
+
+Compose fills the values in when you run `docker compose up`. The `:?` makes it
+stop with that message if the value is missing, instead of quietly starting
+Glimpse with a blank token. Keep `.env` out of version control.
+
+#### Option 2: Docker secrets (`_FILE` variables)
+
+Set `<SERVER>_TOKEN_FILE` to the path of a file holding the token, and leave
+`<SERVER>_TOKEN` unset or empty:
+
+```yaml
+services:
+  glimpse-media-viewer:
+    environment:
+      - JELLYFIN_URL=http://your-jellyfin-server:8096
+      - JELLYFIN_TOKEN_FILE=/run/secrets/jellyfin_token
+    secrets:
+      - jellyfin_token
+
+secrets:
+  jellyfin_token:
+    file: ./jellyfin_token.txt
+```
+
+- `<SERVER>_TOKEN` always wins if it is set, so the file is only read when the
+  plain variable is empty.
+- Spaces and a trailing newline in the file are ignored.
+- If the file is missing or empty, the container stops at startup with a
+  message naming the variable and the path, rather than starting without that
+  server.
+
 ### Library Exclusion
 
 You can exclude specific libraries from being displayed in Glimpse. This is useful for:
@@ -415,25 +473,17 @@ To trigger a data update manually (using your configured exclusions). Your
 library stays browsable while these run — the new snapshot only replaces the old
 one once it has finished:
 
-**Plex:**
-
 ```bash
-docker exec glimpse-media-viewer bash -c 'python /app/scripts/plex_data_fetcher.py --url "$PLEX_URL" --token "$PLEX_TOKEN" --output /app/data/plex'
+docker exec glimpse-media-viewer python3 /app/scripts/glimpse_config.py --run-fetch plex
+docker exec glimpse-media-viewer python3 /app/scripts/glimpse_config.py --run-fetch jellyfin
+docker exec glimpse-media-viewer python3 /app/scripts/glimpse_config.py --run-fetch emby
 ```
 
-**Jellyfin:**
+Each runs exactly what that server's scheduled update runs, with your configured
+settings, including a token read from a `_FILE` variable.
 
-```bash
-docker exec glimpse-media-viewer bash -c 'python /app/scripts/jellyfin_data_fetcher.py --url "$JELLYFIN_URL" --token "$JELLYFIN_TOKEN" --output /app/data/jellyfin'
-```
-
-**Emby:**
-
-```bash
-docker exec glimpse-media-viewer bash -c 'python /app/scripts/jellyfin_data_fetcher.py --url "$EMBY_URL" --token "$EMBY_TOKEN" --output /app/data/emby'
-```
-
-To manually specify different exclusions for testing:
+To manually specify different exclusions for testing (these read the token from
+`<SERVER>_TOKEN`, so they need it set as a plain variable):
 
 **Plex with custom exclusions:**
 
@@ -444,13 +494,13 @@ docker exec glimpse-media-viewer bash -c 'python /app/scripts/plex_data_fetcher.
 **Jellyfin with custom exclusions:**
 
 ```bash
-docker exec glimpse-media-viewer bash -c 'python /app/scripts/jellyfin_data_fetcher.py --url "$JELLYFIN_URL" --token "$JELLYFIN_TOKEN" --exclude-libraries "Adult Content" "Personal Files" --output /app/data/jellyfin'
+docker exec glimpse-media-viewer bash -c 'python /app/scripts/jellyfin_data_fetcher.py --server jellyfin --url "$JELLYFIN_URL" --token "$JELLYFIN_TOKEN" --exclude-libraries "Adult Content" "Personal Files" --output /app/data/jellyfin'
 ```
 
 **Emby with custom exclusions:**
 
 ```bash
-docker exec glimpse-media-viewer bash -c 'python /app/scripts/jellyfin_data_fetcher.py --url "$EMBY_URL" --token "$EMBY_TOKEN" --exclude-libraries "Adult Content" "Personal Files" --output /app/data/emby'
+docker exec glimpse-media-viewer bash -c 'python /app/scripts/jellyfin_data_fetcher.py --server emby --url "$EMBY_URL" --token "$EMBY_TOKEN" --exclude-libraries "Adult Content" "Personal Files" --output /app/data/emby'
 ```
 
 ### Common Issues
@@ -603,7 +653,7 @@ and release flow, and [docs/docker.md](docs/docker.md) for the image.
 
 ## 🔐 Security Considerations
 
-- Media server tokens provide access to your media servers. Keep them secure.
+- Media server tokens provide access to your media servers. Keep them secure. You can keep them out of `docker-compose.yml` with a `.env` file or Docker secrets; see [Keeping Tokens Out of the Compose File](#keeping-tokens-out-of-the-compose-file).
 - All data access is read-only, so there's no risk of modifying your media libraries.
 - Consider using a dedicated API token for Glimpse rather than your main user token.
 - Library exclusions help keep sensitive content private and separate from your main viewing interface.

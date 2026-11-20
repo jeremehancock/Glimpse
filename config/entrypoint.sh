@@ -143,11 +143,18 @@ needs_fetch() {
     return 1
 }
 
+# This function never reads a server's URL, token or exclusions itself. Those
+# are resolved once, by glimpse_config.py, and `--run-fetch` executes exactly
+# the command its cron entry runs. This used to read them a second time here,
+# unstripped, so the two could disagree, and a token supplied by
+# `<SERVER>_TOKEN_FILE` would never have reached the boot fetch at all.
 run_initial_fetch() {
-    local server_id=$1 fetcher=$2 url_var=$3 token_var=$4 exclude_var=$5
-    local url=${!url_var:-} token=${!token_var:-}
+    local server_id=$1
 
-    [ -n "$url" ] && [ -n "$token" ] || return 0
+    # A current fingerprint exists for exactly the servers the resolution step
+    # found configured, so its presence is "configured". Asking the
+    # environment again here would be a second answer to that question.
+    [ -f "$FINGERPRINT_DIR/$server_id" ] || return 0
 
     if ! needs_fetch "$server_id"; then
         echo "Skipping $server_id fetch: settings unchanged since its last import."
@@ -155,9 +162,7 @@ run_initial_fetch() {
     fi
 
     echo "Fetching $server_id data ($FETCH_REASON)..."
-    if ! env "$exclude_var=${!exclude_var:-}" \
-        python3 "/app/scripts/${fetcher}_data_fetcher.py" \
-        --url "$url" --token "$token" --output "$DATA_DIR/$server_id"; then
+    if ! python3 /app/scripts/glimpse_config.py --run-fetch "$server_id"; then
         echo "Warning: initial $server_id fetch failed. The scheduled run will retry." >&2
         # Deliberately no fingerprint written. Recording one here would assert
         # that the data on disk came from these settings; the next restart would
@@ -172,10 +177,9 @@ run_initial_fetch() {
 }
 
 echo "Running initial data fetch..."
-run_initial_fetch plex plex PLEX_URL PLEX_TOKEN PLEX_EXCLUDE_LIBRARIES
-run_initial_fetch jellyfin jellyfin JELLYFIN_URL JELLYFIN_TOKEN JELLYFIN_EXCLUDE_LIBRARIES
-# Emby uses the Jellyfin fetcher — the APIs are compatible.
-run_initial_fetch emby jellyfin EMBY_URL EMBY_TOKEN EMBY_EXCLUDE_LIBRARIES
+for server_id in plex jellyfin emby; do
+    run_initial_fetch "$server_id"
+done
 
 chown -R www-data:www-data "$DATA_DIR" 2>/dev/null || true
 chown -R www-data:www-data "$WEB_DIR" 2>/dev/null || true

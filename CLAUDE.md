@@ -179,6 +179,18 @@ those tags.
   their APIs are compatible, which is why one fetcher already serves both. A fix
   applied to one that isn't applied to the other is a bug, and the reason
   library-exclusion had to be fixed twice.
+  - **Where they DO differ, it goes in `IDENTITIES` in the fetcher, keyed by
+    `--server`.** Sign-in is the difference that forced it: current Jellyfin
+    answers `X-Emby-Token` with a 401, and because a failed fetch keeps the old
+    snapshot, a Jellyfin library froze with a valid key and nothing on screen
+    to say so. Jellyfin gets `Authorization: MediaBrowser Token="..."`, Emby
+    keeps `X-Emby-Token`. The exclusion variable is the other entry; it was
+    `EMBY_... or JELLYFIN_...` for both, so Jellyfin applied Emby's list.
+- **A server's settings are resolved once, by `glimpse_config.py`.** The
+  crontab and the boot fetch (`--run-fetch <id>`) both run
+  `Server.fetch_argv()`; the entrypoint never reads `*_URL`/`*_TOKEN` itself.
+  That is what lets `<SERVER>_TOKEN_FILE` work at all: a second reader in shell
+  would never have seen a token that came from a file.
 - **A refresh NEVER deletes what it is replacing.** `movies.json` and
   `tvshows.json` are written to temp files beside them and renamed into place
   once **both** are complete — `scripts/snapshot_io.py`, and nothing may write a

@@ -14,8 +14,47 @@ import pickle
 
 import snapshot_io
 
+# This one fetcher serves two servers whose APIs are compatible. Where they
+# differ, the difference lives in this table and nowhere else, so a third one
+# has an obvious home rather than becoming an `if` in two places.
+#
+# Sign-in is the difference that made this table necessary. Current Jellyfin
+# refuses the legacy `X-Emby-Token` header with a 401, and the fetch then fails
+# with the last snapshot still being served, so the library silently stops
+# updating. Jellyfin accepts the `Authorization: MediaBrowser Token="..."` form
+# on old and new releases alike. Emby keeps the header it has always been sent.
+#
+# The exclusion variable is the other difference. This used to read
+# `EMBY_EXCLUDE_LIBRARIES or JELLYFIN_EXCLUDE_LIBRARIES` whichever server was
+# being fetched, so on a container configured with both, Jellyfin's boot fetch
+# applied Emby's exclusions.
+IDENTITIES = {
+    'jellyfin': {
+        'name': 'Jellyfin',
+        'exclude_env': 'JELLYFIN_EXCLUDE_LIBRARIES',
+        'auth_headers': lambda token: {'Authorization': f'MediaBrowser Token="{token}"'},
+    },
+    'emby': {
+        'name': 'Emby',
+        'exclude_env': 'EMBY_EXCLUDE_LIBRARIES',
+        'auth_headers': lambda token: {'X-Emby-Token': token},
+    },
+}
+
+# Matches the script's name, and keeps a hand-run Jellyfin command that predates
+# `--server` working.
+DEFAULT_IDENTITY = 'jellyfin'
+
+
+def excluded_libraries_from_env(server, environ=os.environ):
+    """The exclusion list for `server`, from that server's own variable only."""
+    raw = environ.get(IDENTITIES[server]['exclude_env'], '')
+    return [lib.strip() for lib in raw.split(',') if lib.strip()]
+
+
 class JellyfinDataFetcher:
-    def __init__(self, jellyfin_url, jellyfin_token, output_dir="data/jellyfin", page_size=100, excluded_libraries=None):
+    def __init__(self, jellyfin_url, jellyfin_token, output_dir="data/jellyfin", page_size=100, excluded_libraries=None, server=DEFAULT_IDENTITY):
+        self.identity = IDENTITIES[server]
         self.jellyfin_url = jellyfin_url.rstrip('/')
         self.jellyfin_token = jellyfin_token
         self.output_dir = Path(output_dir)
@@ -36,10 +75,8 @@ class JellyfinDataFetcher:
         self.setup_directories()
         
         self.session = requests.Session()
-        self.session.headers.update({
-            'X-Emby-Token': self.jellyfin_token,
-            'Accept': 'application/json'
-        })
+        self.session.headers.update({'Accept': 'application/json'})
+        self.session.headers.update(self.identity['auth_headers'](self.jellyfin_token))
 
     def load_checksums(self):
         """Load existing checksums from file"""
@@ -389,8 +426,8 @@ class JellyfinDataFetcher:
         retried on the next start rather than skipped. Returning False here is
         what becomes a non-zero exit status in main().
         """
-        print(f"Starting Jellyfin data fetch at {datetime.now()}")
-        print(f"Jellyfin URL: {self.jellyfin_url}")
+        print(f"Starting {self.identity['name']} data fetch at {datetime.now()}")
+        print(f"{self.identity['name']} URL: {self.jellyfin_url}")
 
         if self.excluded_libraries:
             print(f"Excluded libraries: {', '.join(self.excluded_libraries)}")
@@ -515,20 +552,20 @@ def main():
     default_token = os.environ.get('JELLYFIN_TOKEN', '')
     default_output = os.environ.get('OUTPUT_DIR', 'data/jellyfin')
     default_page_size = int(os.environ.get('PAGE_SIZE', '100'))
-    
-    # Get excluded libraries from environment variable
-    # Check for EMBY_EXCLUDE_LIBRARIES first (for Emby), fall back to JELLYFIN_EXCLUDE_LIBRARIES
-    excluded_libraries_str = os.environ.get('EMBY_EXCLUDE_LIBRARIES') or os.environ.get('JELLYFIN_EXCLUDE_LIBRARIES', '')
-    excluded_libraries = [lib.strip() for lib in excluded_libraries_str.split(',') if lib.strip()] if excluded_libraries_str else []
-    
-    parser = argparse.ArgumentParser(description='Fetch Jellyfin media data and posters')
-    
+
+    parser = argparse.ArgumentParser(description='Fetch Jellyfin or Emby media data and posters')
+
     # Use environment variables as defaults
+    parser.add_argument('--server', choices=sorted(IDENTITIES), default=DEFAULT_IDENTITY,
+                        help='Which server this is: decides how to sign in and which '
+                             '*_EXCLUDE_LIBRARIES variable to read (default: jellyfin)')
     parser.add_argument('--url', default=default_url, help='Jellyfin server URL (e.g., http://localhost:8096)')
     parser.add_argument('--token', default=default_token, help='Jellyfin API token')
     parser.add_argument('--output', default=default_output, help='Output directory (default: data/jellyfin)')
     parser.add_argument('--page-size', type=int, default=default_page_size, help='Number of items per page (default: 100)')
-    parser.add_argument('--exclude-libraries', nargs='*', default=excluded_libraries, 
+    # Defaults to None so the environment can be read once --server is known:
+    # each server reads only its own exclusion variable.
+    parser.add_argument('--exclude-libraries', nargs='*', default=None,
                         help='Libraries to exclude (library names or IDs, space-separated)')
     
     # Handle special case for tokens with leading hyphens
@@ -538,7 +575,9 @@ def main():
             break
     
     args = parser.parse_args()
-    
+    if args.exclude_libraries is None:
+        args.exclude_libraries = excluded_libraries_from_env(args.server)
+
     # Validate required parameters
     if not args.url:
         print("Error: Jellyfin URL is required. Set with --url or JELLYFIN_URL environment variable.")
@@ -547,7 +586,7 @@ def main():
         print("Error: Jellyfin token is required. Set with --token or JELLYFIN_TOKEN environment variable.")
         sys.exit(1)
     
-    fetcher = JellyfinDataFetcher(args.url, args.token, args.output, args.page_size, args.exclude_libraries)
+    fetcher = JellyfinDataFetcher(args.url, args.token, args.output, args.page_size, args.exclude_libraries, server=args.server)
     # Exit non-zero on failure. The caller has to be able to tell a fetch that
     # worked from one that did not: the entrypoint records a settings
     # fingerprint only after a success, and cron logs one that failed.
